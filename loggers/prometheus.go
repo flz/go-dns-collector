@@ -198,7 +198,7 @@ func (o *Prometheus) InitProm() {
 			Name: fmt.Sprintf("%s_top_domains", prom_prefix),
 			Help: "Number of hit per domain topN, partitioned by qname",
 		},
-		[]string{"stream_id", "domain"},
+		[]string{"stream_id", "domain", "resolver"},
 	)
 	o.promRegistry.MustRegister(o.gaugeTopDomains)
 
@@ -207,7 +207,7 @@ func (o *Prometheus) InitProm() {
 			Name: fmt.Sprintf("%s_top_nxdomains", prom_prefix),
 			Help: "Number of hit per nx domain topN, partitioned by qname",
 		},
-		[]string{"stream_id", "domain"},
+		[]string{"stream_id", "domain", "resolver"},
 	)
 	o.promRegistry.MustRegister(o.gaugeTopNxDomains)
 
@@ -225,7 +225,7 @@ func (o *Prometheus) InitProm() {
 			Name: fmt.Sprintf("%s_top_requesters", prom_prefix),
 			Help: "Number of hit per requester topN, partitioned by client IP",
 		},
-		[]string{"stream_id", "ip"},
+		[]string{"stream_id", "ip", "resolver"},
 	)
 	o.promRegistry.MustRegister(o.gaugeTopRequesters)
 
@@ -265,7 +265,9 @@ func (o *Prometheus) InitProm() {
 			"flag_aa",
 			"flag_ra",
 			"flag_ad",
-			"pkt_err"},
+			"pkt_err",
+			"resolver",
+		},
 	)
 	o.promRegistry.MustRegister(o.counterPackets)
 
@@ -275,7 +277,7 @@ func (o *Prometheus) InitProm() {
 			Help:    "Size of the queries in bytes.",
 			Buckets: []float64{50, 100, 250, 500},
 		},
-		[]string{"stream_id"},
+		[]string{"stream_id", "resolver"},
 	)
 	o.promRegistry.MustRegister(o.histogramQueriesLength)
 
@@ -285,7 +287,7 @@ func (o *Prometheus) InitProm() {
 			Help:    "Size of the replies in bytes.",
 			Buckets: []float64{50, 100, 250, 500},
 		},
-		[]string{"stream_id"},
+		[]string{"stream_id", "resolver"},
 	)
 	o.promRegistry.MustRegister(o.histogramRepliesLength)
 
@@ -295,7 +297,7 @@ func (o *Prometheus) InitProm() {
 			Help:    "Size of the qname in bytes.",
 			Buckets: []float64{10, 20, 40, 60, 100},
 		},
-		[]string{"stream_id"},
+		[]string{"stream_id", "resolver"},
 	)
 	o.promRegistry.MustRegister(o.histogramQnamesLength)
 
@@ -305,7 +307,7 @@ func (o *Prometheus) InitProm() {
 			Help:    "Latency between query and reply",
 			Buckets: []float64{0.001, 0.010, 0.050, 0.100, 0.5, 1.0},
 		},
-		[]string{"stream_id"},
+		[]string{"stream_id", "resolver"},
 	)
 	o.promRegistry.MustRegister(o.histogramLatencies)
 
@@ -314,7 +316,7 @@ func (o *Prometheus) InitProm() {
 			Name: fmt.Sprintf("%s_received_bytes_total", prom_prefix),
 			Help: "The total bytes received",
 		},
-		[]string{"stream_id"},
+		[]string{"stream_id", "resolver"},
 	)
 	o.promRegistry.MustRegister(o.totalReceivedBytes)
 
@@ -323,7 +325,7 @@ func (o *Prometheus) InitProm() {
 			Name: fmt.Sprintf("%s_sent_bytes_total", prom_prefix),
 			Help: "The total bytes sent",
 		},
-		[]string{"stream_id"},
+		[]string{"stream_id", "resolver"},
 	)
 	o.promRegistry.MustRegister(o.totalSentBytes)
 
@@ -332,7 +334,7 @@ func (o *Prometheus) InitProm() {
 			Name: fmt.Sprintf("%s_domains_total", prom_prefix),
 			Help: "The total number of domains per stream identity",
 		},
-		[]string{"stream_id"},
+		[]string{"stream_id", "resolver"},
 	)
 	o.promRegistry.MustRegister(o.counterDomains)
 
@@ -359,7 +361,7 @@ func (o *Prometheus) InitProm() {
 			Name: fmt.Sprintf("%s_nxdomains_total", prom_prefix),
 			Help: "The total number of unknown domains per stream identity",
 		},
-		[]string{"stream_id"},
+		[]string{"stream_id", "resolver"},
 	)
 	o.promRegistry.MustRegister(o.counterDomainsNx)
 
@@ -377,7 +379,7 @@ func (o *Prometheus) InitProm() {
 			Name: fmt.Sprintf("%s_requesters_total", prom_prefix),
 			Help: "The total number of DNS clients per stream identity",
 		},
-		[]string{"stream_id"},
+		[]string{"stream_id", "resolver"},
 	)
 	o.promRegistry.MustRegister(o.counterRequesters)
 
@@ -404,7 +406,7 @@ func (o *Prometheus) InitProm() {
 			Name: fmt.Sprintf("%s_domains_uniq_total", prom_prefix),
 			Help: "The total number of uniq domains",
 		},
-		[]string{},
+		[]string{"resolver"},
 	)
 	o.promRegistry.MustRegister(o.counterDomainsUniq)
 
@@ -413,7 +415,7 @@ func (o *Prometheus) InitProm() {
 			Name: fmt.Sprintf("%s_domains_nx_uniq_total", prom_prefix),
 			Help: "The total number of uniq unknown domains",
 		},
-		[]string{},
+		[]string{"resolver"},
 	)
 	o.promRegistry.MustRegister(o.counterDomainsNxUniq)
 
@@ -431,7 +433,7 @@ func (o *Prometheus) InitProm() {
 			Name: fmt.Sprintf("%s_requesters_uniq_total", prom_prefix),
 			Help: "The total number of uniq DNS clients",
 		},
-		[]string{},
+		[]string{"resolver"},
 	)
 	o.promRegistry.MustRegister(o.counterRequestersUniq)
 }
@@ -476,6 +478,9 @@ func (o *Prometheus) Stop() {
 }
 
 func (o *Prometheus) Record(dm dnsutils.DnsMessage) {
+	var resolver string
+	resolver = dm.NetworkInfo.ResponseIp
+
 	// record stream identity
 	if _, exists := o.streamsMap[dm.DnsTap.Identity]; !exists {
 		o.streamsMap[dm.DnsTap.Identity] = new(EpsCounters)
@@ -500,25 +505,26 @@ func (o *Prometheus) Record(dm dnsutils.DnsMessage) {
 		strconv.FormatBool(dm.DNS.Flags.RA),
 		strconv.FormatBool(dm.DNS.Flags.AD),
 		strconv.FormatBool(dm.DNS.MalformedPacket),
+		resolver,
 	).Inc()
 
 	// count the number of queries and replies
 	// count the total bytes for queries and replies
 	// and then make a histogram for queries and replies packet length observed
 	if dm.DNS.Type == dnsutils.DnsQuery {
-		o.totalReceivedBytes.WithLabelValues(dm.DnsTap.Identity).Add(float64(dm.DNS.Length))
-		o.histogramQueriesLength.WithLabelValues(dm.DnsTap.Identity).Observe(float64(dm.DNS.Length))
+		o.totalReceivedBytes.WithLabelValues(dm.DnsTap.Identity, resolver).Add(float64(dm.DNS.Length))
+		o.histogramQueriesLength.WithLabelValues(dm.DnsTap.Identity, resolver).Observe(float64(dm.DNS.Length))
 	} else {
-		o.totalSentBytes.WithLabelValues(dm.DnsTap.Identity).Add(float64(dm.DNS.Length))
-		o.histogramRepliesLength.WithLabelValues(dm.DnsTap.Identity).Observe(float64(dm.DNS.Length))
+		o.totalSentBytes.WithLabelValues(dm.DnsTap.Identity, resolver).Add(float64(dm.DNS.Length))
+		o.histogramRepliesLength.WithLabelValues(dm.DnsTap.Identity, resolver).Observe(float64(dm.DNS.Length))
 	}
 
 	// make histogram for qname length observed
-	o.histogramQnamesLength.WithLabelValues(dm.DnsTap.Identity).Observe(float64(len(dm.DNS.Qname)))
+	o.histogramQnamesLength.WithLabelValues(dm.DnsTap.Identity, resolver).Observe(float64(len(dm.DNS.Qname)))
 
 	// make histogram for latencies observed
 	if dm.DnsTap.Latency > 0.0 {
-		o.histogramLatencies.WithLabelValues(dm.DnsTap.Identity).Observe(dm.DnsTap.Latency)
+		o.histogramLatencies.WithLabelValues(dm.DnsTap.Identity, resolver).Observe(dm.DnsTap.Latency)
 	}
 
 	/* count all domains name and top domains */
