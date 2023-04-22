@@ -35,6 +35,7 @@ func IsValidMode(mode string) bool {
 	case
 		dnsutils.MODE_TEXT,
 		dnsutils.MODE_JSON,
+		dnsutils.MODE_FLATJSON,
 		dnsutils.MODE_PCAP,
 		dnsutils.MODE_DNSTAP:
 		return true
@@ -202,7 +203,7 @@ func (l *LogFile) OpenFile() error {
 	l.fileSize = fileinfo.Size()
 
 	switch l.config.Loggers.LogFile.Mode {
-	case dnsutils.MODE_TEXT, dnsutils.MODE_JSON:
+	case dnsutils.MODE_TEXT, dnsutils.MODE_JSON, dnsutils.MODE_FLATJSON:
 		l.writerPlain = bufio.NewWriter(fd)
 
 	case dnsutils.MODE_PCAP:
@@ -334,7 +335,7 @@ func (l *LogFile) CompressPostRotateCommand(filename string) {
 
 func (l *LogFile) FlushWriters() {
 	switch l.config.Loggers.LogFile.Mode {
-	case dnsutils.MODE_TEXT, dnsutils.MODE_JSON:
+	case dnsutils.MODE_TEXT, dnsutils.MODE_JSON, dnsutils.MODE_FLATJSON:
 		l.writerPlain.Flush()
 	case dnsutils.MODE_DNSTAP:
 		l.writerDnstap.Flush()
@@ -452,7 +453,9 @@ func (l *LogFile) Run() {
 	l.LogInfo("running in background...")
 
 	// prepare transforms
-	subprocessors := transformers.NewTransforms(&l.config.OutgoingTransformers, l.logger, l.name)
+	listChannel := []chan dnsutils.DnsMessage{}
+	listChannel = append(listChannel, l.channel)
+	subprocessors := transformers.NewTransforms(&l.config.OutgoingTransformers, l.logger, l.name, listChannel)
 
 	// prepare some timers
 	flushInterval := time.Duration(l.config.Loggers.LogFile.FlushInterval) * time.Second
@@ -481,8 +484,23 @@ LOOP:
 
 			// with basic text mode
 			case dnsutils.MODE_TEXT:
-				delimiter := "\n"
-				l.WriteToPlain(dm.Bytes(l.textFormat, delimiter))
+				l.WriteToPlain(dm.Bytes(l.textFormat,
+					l.config.Global.TextFormatDelimiter,
+					l.config.Global.TextFormatBoundary))
+
+				var delimiter bytes.Buffer
+				delimiter.WriteString("\n")
+				l.WriteToPlain(delimiter.Bytes())
+
+			// with json mode
+			case dnsutils.MODE_FLATJSON:
+				flat, err := dm.Flatten()
+				if err != nil {
+					l.LogError("flattening DNS message failed: %e", err)
+				}
+				json.NewEncoder(buffer).Encode(flat)
+				l.WriteToPlain(buffer.Bytes())
+				buffer.Reset()
 
 			// with json mode
 			case dnsutils.MODE_JSON:

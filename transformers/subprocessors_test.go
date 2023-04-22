@@ -21,11 +21,15 @@ func TestTransformsSuspicious(t *testing.T) {
 	config.Suspicious.Enable = true
 
 	// init subproccesor
-	subprocessors := NewTransforms(config, logger.New(false), "test")
+	channels := []chan dnsutils.DnsMessage{}
+	subprocessors := NewTransforms(config, logger.New(false), "test", channels)
 
 	// malformed DNS message
 	dm := dnsutils.GetFakeDnsMessage()
 	dm.DNS.MalformedPacket = true
+
+	// init dns message with additional part
+	subprocessors.InitDnsMessageFormat(&dm)
 
 	return_code := subprocessors.ProcessMessage(&dm)
 
@@ -49,11 +53,15 @@ func TestTransformsGeoIPLookupCountry(t *testing.T) {
 	config.GeoIP.DbCountryFile = "../testsdata/GeoLite2-Country.mmdb"
 
 	// init processor
-	subprocessors := NewTransforms(config, logger.New(false), "test")
+	channels := []chan dnsutils.DnsMessage{}
+	subprocessors := NewTransforms(config, logger.New(false), "test", channels)
 
 	// create test message
 	dm := dnsutils.GetFakeDnsMessage()
 	dm.NetworkInfo.QueryIp = "83.112.146.176"
+
+	// init dns message with additional part
+	subprocessors.InitDnsMessageFormat(&dm)
 
 	// apply subprocessors
 	return_code := subprocessors.ProcessMessage(&dm)
@@ -74,17 +82,21 @@ func TestTransformsGeoIPLookupAsn(t *testing.T) {
 	config.GeoIP.DbAsnFile = "../testsdata/GeoLite2-ASN.mmdb"
 
 	// init the processor
-	subprocessors := NewTransforms(config, logger.New(false), "test")
+	channels := []chan dnsutils.DnsMessage{}
+	subprocessors := NewTransforms(config, logger.New(false), "test", channels)
 
 	// create test message
 	dm := dnsutils.GetFakeDnsMessage()
 	dm.NetworkInfo.QueryIp = "83.112.146.176"
 
+	// init dns message with additional part
+	subprocessors.InitDnsMessageFormat(&dm)
+
 	// apply subprocessors
 	return_code := subprocessors.ProcessMessage(&dm)
 
-	if dm.NetworkInfo.AutonomousSystemOrg != "Orange" {
-		t.Errorf("asn organisation invalid want: Orange got: %s", dm.NetworkInfo.AutonomousSystemOrg)
+	if dm.Geo.AutonomousSystemOrg != "Orange" {
+		t.Errorf("asn organisation invalid want: Orange got: %s", dm.Geo.AutonomousSystemOrg)
 	}
 
 	if return_code != RETURN_SUCCESS {
@@ -99,10 +111,14 @@ func TestTransformsReduceQname(t *testing.T) {
 	config.UserPrivacy.MinimazeQname = true
 
 	// init the processor
-	subprocessors := NewTransforms(config, logger.New(false), "test")
+	channels := []chan dnsutils.DnsMessage{}
+	subprocessors := NewTransforms(config, logger.New(false), "test", channels)
 
 	// create test message
 	dm := dnsutils.GetFakeDnsMessage()
+
+	// init dns message with additional part
+	subprocessors.InitDnsMessageFormat(&dm)
 
 	// test 1: google.com
 	dm.DNS.Qname = NORM_ADDRESS
@@ -145,10 +161,14 @@ func TestTransformsAnonymizeIPv4(t *testing.T) {
 	config.UserPrivacy.AnonymizeIP = true
 
 	// init the processor
-	subprocessors := NewTransforms(config, logger.New(false), "test")
+	channels := []chan dnsutils.DnsMessage{}
+	subprocessors := NewTransforms(config, logger.New(false), "test", channels)
 
 	// create test message
 	dm := dnsutils.GetFakeDnsMessage()
+
+	// init dns message with additional part
+	subprocessors.InitDnsMessageFormat(&dm)
 
 	dm.NetworkInfo.QueryIp = "192.168.1.2"
 
@@ -168,10 +188,14 @@ func TestTransformsAnonymizeIPv6(t *testing.T) {
 	config.UserPrivacy.AnonymizeIP = true
 
 	// init the processor
-	subprocessors := NewTransforms(config, logger.New(false), "test")
+	channels := []chan dnsutils.DnsMessage{}
+	subprocessors := NewTransforms(config, logger.New(false), "test", channels)
 
 	// create test message
 	dm := dnsutils.GetFakeDnsMessage()
+
+	// init dns message with additional part
+	subprocessors.InitDnsMessageFormat(&dm)
 
 	dm.NetworkInfo.QueryIp = IPV6_ADDRESS
 
@@ -191,10 +215,13 @@ func TestTransformsNormalizeLowercaseQname(t *testing.T) {
 	config.Normalize.QnameLowerCase = true
 
 	// init the processor
-	subprocessors := NewTransforms(config, logger.New(false), "test")
+	channels := []chan dnsutils.DnsMessage{}
+	subprocessors := NewTransforms(config, logger.New(false), "test", channels)
 
 	// create test message
 	dm := dnsutils.GetFakeDnsMessage()
+	// init dns message with additional part
+	subprocessors.InitDnsMessageFormat(&dm)
 
 	dm.DNS.Qname = CAPS_ADDRESS
 	dm.NetworkInfo.QueryIp = IPV6_ADDRESS
@@ -217,10 +244,13 @@ func TestMultiTransforms(t *testing.T) {
 	config.UserPrivacy.AnonymizeIP = true
 
 	// init the processor
-	subprocessors := NewTransforms(config, logger.New(false), "test")
+	channels := []chan dnsutils.DnsMessage{}
+	subprocessors := NewTransforms(config, logger.New(false), "test", channels)
 
 	// create test message
 	dm := dnsutils.GetFakeDnsMessage()
+	// init dns message with additional part
+	subprocessors.InitDnsMessageFormat(&dm)
 
 	dm.DNS.Qname = CAPS_ADDRESS
 	dm.NetworkInfo.QueryIp = IPV6_ADDRESS
@@ -250,7 +280,8 @@ func TestTransformAndFilter(t *testing.T) {
 	TEST_URL2 := "test.github.com"
 
 	// init the processor
-	subprocessors := NewTransforms(config, logger.New(false), "test")
+	channels := []chan dnsutils.DnsMessage{}
+	subprocessors := NewTransforms(config, logger.New(false), "test", channels)
 
 	// create test message
 	dm := dnsutils.GetFakeDnsMessage()

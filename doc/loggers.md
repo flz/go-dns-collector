@@ -12,6 +12,8 @@
 - [Loki](#loki-client)
 - [Statsd](#statsd-client)
 - [ElasticSearch](#elasticsearch-client)
+- [Scalyr](#scalyr-client)
+- [Redispub](#redispub)
 
 ## Loggers
 
@@ -47,6 +49,8 @@ This logger generates **prometheus** metrics. Use the following Grafana [dashboa
 Options:
 - `listen-ip`: (string) listening IP
 - `listen-port`: (integer) listening port
+- `basic-auth-login`: (string) default login for basic auth
+- `basic-auth-pwd`: (string) default password for basic auth
 - `tls-support`: (boolean) tls support
 - `tls-mutual`: (boolean) mtls authentication
 - `tls-min-version`: (string) min tls version, default to 1.2
@@ -61,6 +65,8 @@ Default values:
 prometheus:
   listen-ip: 0.0.0.0
   listen-port: 8081
+  basic-auth-login: admin
+  basic-auth-pwd: changeme
   tls-support: false
   tls-mutual: false
   tls-min-version: 1.2
@@ -73,7 +79,7 @@ prometheus:
 Scrape metric with curl:
 
 ```
-$ curl http://127.0.0.1:8080/metrics
+$ curl -u admin:changeme http://127.0.0.1:8080/metrics
 ```
 
 The full metrics can be found [here](doc/metrics.txt).
@@ -89,6 +95,7 @@ See the [swagger](https://generator.swagger.io/?url=https://raw.githubuserconten
 Options:
 - `listen-ip`: (string) listening IP
 - `listen-port`: (integer) listening port
+- `basic-auth-enable`: (boolean) enable or disable basic authentication
 - `basic-auth-login`: (string) default login for basic auth
 - `basic-auth-pwd`: (string) default password for basic auth
 - `tls-support`: (boolean) tls support
@@ -103,6 +110,7 @@ Default values:
 restapi:
   listen-ip: 0.0.0.0
   listen-port: 8080
+  basic-auth-enable: true
   basic-auth-login: admin
   basic-auth-pwd: changeme
   tls-support: true
@@ -116,15 +124,15 @@ restapi:
 
 Enable this logger if you want to log your DNS traffic to a file in plain text mode or binary mode.
 * with rotation file support
-* supported format: `text`, `json`, `pcap` or `dnstap`
+* supported format: `text`, `json` and `flat json`, `pcap` or `dnstap`
 * gzip compression
 * execute external command after each rotation
 * custom text format
 
 For config examples, take a look to the following links:
-- [text](https://github.com/dmachard/go-dns-collector/blob/main/example-config/use-case-7.yml).
-- [dnstap](https://github.com/dmachard/go-dns-collector/blob/main/example-config/use-case-13.yml).
-- [pcap](https://github.com/dmachard/go-dns-collector/blob/main/example-config/use-case-13.yml).
+- [`text`](https://github.com/dmachard/go-dns-collector/blob/main/example-config/use-case-7.yml)
+- [`dnstap`](https://github.com/dmachard/go-dns-collector/blob/main/example-config/use-case-13.yml)
+- [`pcap`](https://github.com/dmachard/go-dns-collector/blob/main/example-config/use-case-1.yml)
 
 Options:
 - `file-path`: (string) output logfile name
@@ -134,7 +142,7 @@ Options:
 - `compress`: (boolean) compress log file
 - `compress-interval`: (integer) checking every X seconds if new log files must be compressed
 - `compress-command`: (string) run external script after file compress step
-- `mode`: (string)  output format: text|json|pcap|dnstap
+- `mode`: (string)  output format: text|json|pcap|dnstap|flat-json
 - `text-format`: (string) output text format, please refer to the default text format to see all available directives, use this parameter if you want a specific format
 - `postrotate-command`: (string) run external script after file rotation
 - `postrotate-delete-success`: (boolean) delete file on script success
@@ -186,8 +194,8 @@ For the `PCAP` mode, currently the DNS protocol over UDP is used to log the traf
 | -----------------------|--------------------------------| 
 | DNS/53 over UDP        | DNS UDP/53                     | 
 | DNS/53 over TCP        | DNS UDP/53                     | 
-| DoH/443                | Not yet supported              | 
-| DoT/853                | Not yet supported              | 
+| DoH/443                | DNS UDP/443                    | 
+| DoT/853                | DoT/853 (no cipher)            | 
 | DoQ                    | Not yet supported              | 
 
 
@@ -201,11 +209,15 @@ Options:
 - `listen-ip`: (string) remote address
 - `listen-port`: (integer) remote tcp port
 - `sock-path`: (string) unix socket path
+- `connect-timeout`: (integer) connect timeout in second
 - `retry-interval`: (integer) interval in second between retry reconnect
+- `flush-interval`: (integer) interval in second before to flush the buffer
 - `tls-support`: (boolean) enable tls
 - `tls-insecure`: (boolean) insecure skip verify
 - `tls-min-version`: (string) min tls version, default to 1.2
-- `server-id`: server identity
+- `server-id`: (string) server identity
+- `overwrite-identity`: (boolean) overwrite original identity
+- `buffer-size`: (integer) number of dns messages in buffer
 
 Default values:
 
@@ -214,11 +226,15 @@ dnstap:
   remote-address: 10.0.0.1
   remote-port: 6000
   sock-path: null
-  retry-interval: 5
+  connect-timeout: 5
+  retry-interval: 10
+  flush-interval: 30
   tls-support: false
   tls-insecure: false
   tls-min-version: 1.2
   server-id: "dnscollector"
+  overwrite-identity: false
+  buffer-size: 100
 ```
 
 ### TCP Client
@@ -234,12 +250,15 @@ Options:
 - `listen-ip`: (string) remote address
 - `listen-port`: (integer) remote tcp port
 - `sock-path`: (string) unix socket path
+- `connect-timeout`: (integer) connect timeout in second
 - `retry-interval`: (integer) interval in second between retry reconnect
+- `flush-interval`: (integer) interval in second before to flush the buffer
 - `tls-support`: (boolean) enable tls
 - `tls-insecure`: (boolean) insecure skip verify
 - `tls-min-version`: (string) min tls version, default to 1.2
 - `mode`: (string)  output format: text|json
 - `text-format`: (string) output text format, please refer to the default text format to see all available directives, use this parameter if you want a specific format
+- `buffer-size`: (integer) number of dns messages in buffer
 
 Default values:
 
@@ -249,12 +268,15 @@ tcpclient:
   remote-address: 127.0.0.1
   remote-port: 9999
   sock-path: null
-  retry-interval: 5
+  connect-timeout: 5
+  retry-interval: 10
+  flush-interval: 30
   tls-support: false
   tls-insecure: false
   tls-min-version: 1.2
   mode: json
   text-format: ""
+  buffer-size: 100
 ```
 
 ### Syslog
@@ -269,12 +291,12 @@ Options:
 - `facility`: (string) Set the syslog logging facility
 - `transport`: (string) Transport to use to a remote log daemon or local one. local|tcp|udp|unix
 - `remote-address`: (string) Remote address host:port
-- `mode`: (string) text or json
+- `mode`: (string) text, json or flat-json
 - `text-format`: (string) output text format, please refer to the default text format to see all available directives, use this parameter if you want a specific format
 - `tls-support`: (boolean) enable tls
 - `tls-insecure`: (boolean) insecure skip verify
 - `tls-min-version`: (string) min tls version, default to 1.2
-- `format`: (string) Set syslog formatter between `unix` (default), `rfc3164` (see: https://www.rfc-editor.org/rfc/rfc3164 ) or `rfc5424` (see: https://www.rfc-editor.org/rfc/rfc5424)
+- `format`: (string) Set syslog formatter between `unix` (default), [`rfc3164`](https://www.rfc-editor.org/rfc/)rfc3164 ) or [`rfc5424`](https://www.rfc-editor.org/rfc/rfc5424)
 
 Default values:
 
@@ -304,11 +326,14 @@ Options:
 - `listen-ip`: (string) remote address
 - `listen-port`: (integer) remote tcp port
 - `sock-path`: (string) unix socket path
+- `connect-timeout`: (integer) connect timeout in second
 - `retry-interval`: (integer) interval in second between retry reconnect
+- `flush-interval`: (integer) interval in second before to flush the buffer
 - `tag`: (string) tag name
 - `tls-support`: (boolean) enable tls
 - `tls-insecure`: (boolean) insecure skip verify
 - `tls-min-version`: (string) min tls version, default to 1.2
+- `buffer-size`: (integer) number of dns messages in buffer
 
 Default values:
 
@@ -318,11 +343,14 @@ fluentd:
   remote-address: 127.0.0.1
   remote-port: 24224
   sock-path: null
-  retry-interval: 5
+  connect-timeout: 5
+  retry-interval: 10
+  flush-interval: 30
   tag: "dns.collector"
   tls-support: false
   tls-insecure: false
   tls-min-version: 1.2
+  buffer-size: 100
 ```
 
 ### InfluxDB client
@@ -358,7 +386,7 @@ Loki client to remote server
 Options:
 - `server-url`: (string) Loki server url
 - `job-name`: (string) Job name
-- `mode`: (string) text or json
+- `mode`: (string) text, json or flat json
 - `flush-interval`: (integer) flush batch every X seconds
 - `batch-size`: (integer) batch size for log entries in bytes
 - `retry-interval`: (integer) interval in second between before to retry to send batch
@@ -381,7 +409,7 @@ lokiclient:
   flush-interval: 5
   batch-size: 1048576
   retry-interval: 10
-  text-format: "localtime identity qr queryip family protocol qname qtype rcode"
+  text-format: ""
   proxy-url: ""
   tls-insecure: false
   tls-min-version: 1.2
@@ -452,4 +480,85 @@ Options:
 ```yaml
 elasticsearch:
   url: "http://127.0.0.1:9200/indexname/_doc"
+```
+
+### Scalyr client
+Client for the Scalyr/DataSet [`addEvents`](https://app.eu.scalyr.com/help/api#addEvents) API endpoint.
+
+Options:
+- `server-url`: (string) Scalyr API Host
+- `apikey`: (string, required) API Token with Log Write permissions
+- `mode`: (string) text, json, or flat-json
+- `parser`: (string) When using text or json mode, the name of the parser Scalyr should use
+- `flush-interval`: (integer) flush batch every X seconds
+- `batch-size`: (integer) batch size for log entries in bytes
+- `text-format`: (string) output text format, please refer to the default text format to see all available directives, use this parameter if you want a specific format
+- `proxy-url`: (string) Proxy URL
+- `tls-insecure`: (boolean) insecure skip verify
+- `tls-min-version`: (string) min tls version
+- `session-info`: (map) Any "session" or server information for Scalyr. e.g. 'region', 'serverHost'. If 'serverHost' is not included, it is set using the hostname.
+- `attrs`: (map) Any extra attributes that should be added to the log's fields.
+
+The client can send the data in 3 formats: text (using `text-format`), json (by including the whole DNS message in the `message` field), or flat-json.
+The first two formats (text, json) require setting the `parser` option and needs a corresponding parser defined in the Scalyr backend.
+As Scalyr's JSON parsers (like 'dottedJSON') will not expand nested JSON and require one or more 'rewrite' statements, the Scalyr client supports a `flat-json` mode.
+
+Defaults:
+```yaml
+scalyrclient:
+  server-url: app.scalyr.com
+  apikey: ""
+  mode: text
+  text-format: "timestamp-rfc3339ns identity operation rcode queryip queryport family protocol length qname qtype latency"
+  sessioninfo: {}
+  attrs: {}
+  parser: ""
+  flush-interval: 30
+  proxy-url: ""
+  tls-insecure: false
+  tls-min-version: 1.2
+```
+
+### Redis Pub
+
+Redis Pub logger
+* to remote tcp destination or unix socket
+* supported format: text, json
+* custom text format
+* tls support
+
+Options:
+- `transport`: (string) network transport to use: tcp|unix
+- `listen-ip`: (string) remote address
+- `listen-port`: (integer) remote tcp port
+- `sock-path`: (string) unix socket path
+- `connect-timeout`: (integer) connect timeout in second
+- `retry-interval`: (integer) interval in second between retry reconnect
+- `flush-interval`: (integer) interval in second before to flush the buffer
+- `tls-support`: (boolean) enable tls
+- `tls-insecure`: (boolean) insecure skip verify
+- `tls-min-version`: (string) min tls version, default to 1.2
+- `mode`: (string)  output format: text|json
+- `text-format`: (string) output text format, please refer to the default text format to see all available directives, use this parameter if you want a specific format
+- `buffer-size`: (integer) number of dns messages in buffer
+- `redis-channel`: (string) name of the redis pubsub channel to publish into
+
+Default values:
+
+```yaml
+redispub:
+  transport: tcp
+  remote-address: 127.0.0.1
+  remote-port: 6379
+  sock-path: null
+  connect-timeout: 5
+  retry-interval: 10
+  flush-interval: 30
+  tls-support: false
+  tls-insecure: false
+  tls-min-version: 1.2
+  mode: json
+  text-format: ""
+  buffer-size: 100
+  redis-channel: dns-collector
 ```

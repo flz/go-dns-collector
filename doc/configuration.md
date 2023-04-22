@@ -60,14 +60,16 @@ global:
 
 ### Custom text format
 
-Custom text format can be configured
-All available directives:
+The text format can be customized with the following directives.
+
+Default directives:
 - `timestamp-rfc3339ns`: timestamp rfc3339 format, with nano support
 - `timestamp-unixms`: unix timestamp with ms support
 - `timestamp-unixus`: unix timestamp with us support
 - `timestamp-unixns`: unix timestamp with nano support
 - `localtime`: local time
 - `identity`: dnstap identity
+- `version`: dnstap version
 - `operation`: dnstap operation
 - `opcode`: dns opcode (integer)
 - `rcode`: dns return code
@@ -81,15 +83,8 @@ All available directives:
 - `length`: the length of the query or reply
 - `qtype`: dns qtype
 - `qname`: dns qname
-- `qnamepublicsuffix`: [Public Suffix](https://publicsuffix.org/) of the DNS QNAME
-- `qnameeffectivetldplusone`: [Public Suffix](https://publicsuffix.org/) plus one label of the DNS QNAME
 - `latency`: computed latency between queries and replies
 - `answercount`: the number of answer
-- `continent`: continent code
-- `country`: country iso code
-- `city`: city name
-- `as-number`: autonomous system number
-- `as-owner`: autonomous system organization/owner
 - `ttl`: answer ttl, only the first one
 - `answer`: rdata answer, only the first one, prefer to use the JSON format if you wamt all answers
 - `malformed`: malformed dns packet, integer value 1/0
@@ -98,18 +93,28 @@ All available directives:
 - `aa`: flag authoritative answer
 - `ra`: flag recursion available
 - `ad`: flag authenticated data
+- `df`: flag when ip defragmented occured
+- `tr`: flag when tcp reassembled occured
 - `edns-csubnet`: display client subnet info
-- `pdns-tag`: powerdns metadata, get one tag only, the first one in the list
-- `pdns-tags`: powerdns metadata, get all tags separated by comma
-- `pdns-original-request-subnet`: powerdns metadata, original request subnet like edns subclient
-- `pdns-applied-policy`: powerdns metadata, applied policy
-- `suspicious-score`: suspicious score for unusual traffic
 
 ```yaml
 global:
   text-format: "timestamp-rfc3339ns identity qr operation rcode queryip queryport family protocol length qname qtype latency ttl"
+  text-format-delimiter: " "
+  text-format-boundary: "\""
 ```
 
+If you require a format like CSV, the delimiter can be configured with the `text-format-delimiter` option.
+The default separator is [space].
+
+Output example:
+
+```
+2023-04-08T18:27:29.268465Z unbound CLIENT_QUERY NOERROR 127.0.0.1 39028 IPv4 UDP 50b google.fr A 0.000000
+2023-04-08T18:27:29.268575Z unbound FORWARDER_QUERY NOERROR 0.0.0.0 20817 IPv4 UDP 38b google.fr A 0.000000
+2023-04-08T18:27:29.278929Z unbound FORWARDER_RESPONSE NOERROR 0.0.0.0 20817 IPv4 UDP 54b google.fr A 0.000000
+2023-04-08T18:27:29.279039Z unbound CLIENT_RESPONSE NOERROR 127.0.0.1 39028 IPv4 UDP 54b google.fr A 0.000000
+```
 
 ## Multiplexer
 
@@ -121,7 +126,7 @@ You must defined the list of
 - `routes`: routing definition
 
 If you want apply some modifications in traffic, you can do that with [transformers](/doc/transformers.md). 
-It can also be done on collectors or loggers.
+Transformers can be applied on collectors or loggers.
 
 ### Collectors
 

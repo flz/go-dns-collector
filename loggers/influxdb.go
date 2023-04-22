@@ -83,7 +83,9 @@ func (o *InfluxDBClient) Run() {
 	o.LogInfo("running in background...")
 
 	// prepare transforms
-	subprocessors := transformers.NewTransforms(&o.config.OutgoingTransformers, o.logger, o.name)
+	listChannel := []chan dnsutils.DnsMessage{}
+	listChannel = append(listChannel, o.channel)
+	subprocessors := transformers.NewTransforms(&o.config.OutgoingTransformers, o.logger, o.name, listChannel)
 
 	// prepare options for influxdb
 	opts := influxdb2.DefaultOptions()
@@ -100,11 +102,16 @@ func (o *InfluxDBClient) Run() {
 		opts.SetTLSConfig(tlsConfig)
 	}
 	// init the client
-	influxClient := influxdb2.NewClientWithOptions(o.config.Loggers.InfluxDB.ServerURL,
-		o.config.Loggers.InfluxDB.AuthToken, opts)
+	influxClient := influxdb2.NewClientWithOptions(
+		o.config.Loggers.InfluxDB.ServerURL,
+		o.config.Loggers.InfluxDB.AuthToken,
+		opts,
+	)
 
-	writeAPI := influxClient.WriteAPI(o.config.Loggers.InfluxDB.Organization,
-		o.config.Loggers.InfluxDB.Bucket)
+	writeAPI := influxClient.WriteAPI(
+		o.config.Loggers.InfluxDB.Organization,
+		o.config.Loggers.InfluxDB.Bucket,
+	)
 
 	o.influxdbConn = influxClient
 	o.writeAPI = writeAPI

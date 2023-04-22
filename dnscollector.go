@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/dmachard/go-dnscollector/collectors"
@@ -42,6 +43,15 @@ func IsCollectorRouted(config *dnsutils.Config, name string) bool {
 		}
 	}
 	return false
+}
+
+func AreRoutesValid(config *dnsutils.Config) (ret error) {
+	for _, route := range config.Multiplexer.Routes {
+		if len(route.Src) == 0 || len(route.Dst) == 0 {
+			ret = fmt.Errorf("incomplete route, from: %s, to: %s", strings.Join(route.Src, ", "), strings.Join(route.Dst, ", "))
+		}
+	}
+	return
 }
 
 func main() {
@@ -149,6 +159,12 @@ func main() {
 		if subcfg.Loggers.ElasticSearchClient.Enable && IsLoggerRouted(config, output.Name) {
 			mapLoggers[output.Name] = loggers.NewElasticSearchClient(subcfg, logger, output.Name)
 		}
+		if subcfg.Loggers.ScalyrClient.Enable && IsLoggerRouted(config, output.Name) {
+			mapLoggers[output.Name] = loggers.NewScalyrClient(subcfg, logger, output.Name)
+		}
+		if subcfg.Loggers.RedisPub.Enable && IsLoggerRouted(config, output.Name) {
+			mapLoggers[output.Name] = loggers.NewRedisPub(subcfg, logger, output.Name)
+		}
 	}
 
 	// load collectors
@@ -181,14 +197,21 @@ func main() {
 			panic(fmt.Sprintf("main - yaml collector config error: %v", err))
 		}
 
+		if err := AreRoutesValid(config); err != nil {
+			panic(fmt.Sprintf("main - configuration error: %e", err))
+		}
+
 		if subcfg.Collectors.Dnstap.Enable && IsCollectorRouted(config, input.Name) {
 			mapCollectors[input.Name] = collectors.NewDnstap(nil, subcfg, logger, input.Name)
 		}
 		if subcfg.Collectors.DnstapProxifier.Enable && IsCollectorRouted(config, input.Name) {
 			mapCollectors[input.Name] = collectors.NewDnstapProxifier(nil, subcfg, logger, input.Name)
 		}
-		if subcfg.Collectors.LiveCapture.Enable && IsCollectorRouted(config, input.Name) {
-			mapCollectors[input.Name] = collectors.NewDnsSniffer(nil, subcfg, logger, input.Name)
+		if subcfg.Collectors.AfpacketLiveCapture.Enable && IsCollectorRouted(config, input.Name) {
+			mapCollectors[input.Name] = collectors.NewAfpacketSniffer(nil, subcfg, logger, input.Name)
+		}
+		if subcfg.Collectors.XdpLiveCapture.Enable && IsCollectorRouted(config, input.Name) {
+			mapCollectors[input.Name] = collectors.NewXdpSniffer(nil, subcfg, logger, input.Name)
 		}
 		if subcfg.Collectors.Tail.Enable && IsCollectorRouted(config, input.Name) {
 			mapCollectors[input.Name] = collectors.NewTail(nil, subcfg, logger, input.Name)
@@ -198,6 +221,9 @@ func main() {
 		}
 		if subcfg.Collectors.FileIngestor.Enable && IsCollectorRouted(config, input.Name) {
 			mapCollectors[input.Name] = collectors.NewFileIngestor(nil, subcfg, logger, input.Name)
+		}
+		if subcfg.Collectors.Tzsp.Enable {
+			mapCollectors[input.Name] = collectors.NewTzsp(nil, subcfg, logger, input.Name)
 		}
 	}
 

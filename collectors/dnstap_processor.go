@@ -2,10 +2,8 @@ package collectors
 
 import (
 	"fmt"
-	"hash/fnv"
 	"net"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/dmachard/go-dnscollector/dnsutils"
@@ -60,6 +58,7 @@ type DnstapProcessor struct {
 
 func NewDnstapProcessor(config *dnsutils.Config, logger *logger.Logger, name string) DnstapProcessor {
 	logger.Info("[%s] dnstap processor - initialization...", name)
+
 	d := DnstapProcessor{
 		done:     make(chan bool),
 		recvFrom: make(chan []byte, 512),
@@ -100,12 +99,8 @@ func (d *DnstapProcessor) Stop() {
 func (d *DnstapProcessor) Run(sendTo []chan dnsutils.DnsMessage) {
 	dt := &dnstap.Dnstap{}
 
-	// dns cache to compute latency between response and query
-	cache_ttl := dnsutils.NewDnsCache(time.Duration(d.config.Collectors.Dnstap.QueryTimeout) * time.Second)
-	d.LogInfo("dns cached enabled: %t", d.config.Collectors.Dnstap.CacheSupport)
-
 	// prepare enabled transformers
-	subprocessors := transformers.NewTransforms(&d.config.IngoingTransformers, d.logger, d.name)
+	subprocessors := transformers.NewTransforms(&d.config.IngoingTransformers, d.logger, d.name, sendTo)
 
 	// read incoming dns message
 	d.LogInfo("running... waiting incoming dns message")
@@ -116,16 +111,29 @@ func (d *DnstapProcessor) Run(sendTo []chan dnsutils.DnsMessage) {
 			continue
 		}
 
+		// init dns message
 		dm := dnsutils.DnsMessage{}
 		dm.Init()
+
+		// init dns message with additionnals parts
+		subprocessors.InitDnsMessageFormat(&dm)
 
 		identity := dt.GetIdentity()
 		if len(identity) > 0 {
 			dm.DnsTap.Identity = string(identity)
 		}
-
+		version := dt.GetVersion()
+		if len(version) > 0 {
+			dm.DnsTap.Version = string(version)
+		}
 		dm.DnsTap.Operation = dt.GetMessage().GetType().String()
-		dm.NetworkInfo.Family = dt.GetMessage().GetSocketFamily().String()
+
+		if ipVersion, valid := dnsutils.IP_VERSION[dt.GetMessage().GetSocketFamily().String()]; valid {
+			dm.NetworkInfo.Family = ipVersion
+		} else {
+			dm.NetworkInfo.Family = dnsutils.STR_UNKNOWN
+		}
+
 		dm.NetworkInfo.Protocol = dt.GetMessage().GetSocketProtocol().String()
 
 		// decode query address and port
@@ -188,33 +196,13 @@ func (d *DnstapProcessor) Run(sendTo []chan dnsutils.DnsMessage) {
 			}
 		}
 
-		// compute latency if possible
-		if d.config.Collectors.Dnstap.CacheSupport {
-			if len(dm.NetworkInfo.QueryIp) > 0 && queryport > 0 && !dm.DNS.MalformedPacket {
-				// compute the hash of the query
-				hash_data := []string{dm.NetworkInfo.QueryIp, dm.NetworkInfo.QueryPort, strconv.Itoa(dm.DNS.Id)}
-
-				hashfnv := fnv.New64a()
-				hashfnv.Write([]byte(strings.Join(hash_data[:], "+")))
-
-				if dm.DNS.Type == dnsutils.DnsQuery {
-					cache_ttl.Set(hashfnv.Sum64(), dm.DnsTap.Timestamp)
-				} else {
-					value, ok := cache_ttl.Get(hashfnv.Sum64())
-					if ok {
-						dm.DnsTap.Latency = dm.DnsTap.Timestamp - value
-					}
-				}
-			}
-		}
-
-		// convert latency to human
-		dm.DnsTap.LatencySec = fmt.Sprintf("%.6f", dm.DnsTap.Latency)
-
 		// apply all enabled transformers
 		if subprocessors.ProcessMessage(&dm) == transformers.RETURN_DROP {
 			continue
 		}
+
+		// convert latency to human
+		dm.DnsTap.LatencySec = fmt.Sprintf("%.6f", dm.DnsTap.Latency)
 
 		// dispatch dns message to all generators
 		for i := range sendTo {

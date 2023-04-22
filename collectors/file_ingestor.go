@@ -1,7 +1,6 @@
 package collectors
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"github.com/dmachard/go-dnscollector/dnsutils"
+	"github.com/dmachard/go-dnscollector/netlib"
 	"github.com/dmachard/go-logger"
 	framestream "github.com/farsightsec/golang-framestream"
 	"github.com/fsnotify/fsnotify"
@@ -43,7 +43,7 @@ type FileIngestor struct {
 	watcherTimers   map[string]*time.Timer
 	dnsProcessor    DnsProcessor
 	dnstapProcessor DnstapProcessor
-	dnsPort         int
+	filterDnsPort   int
 	identity        string
 	name            string
 	mu              sync.Mutex
@@ -84,9 +84,11 @@ func (c *FileIngestor) ReadConfig() {
 	}
 
 	c.identity = c.config.GetServerIdentity()
-	c.dnsPort = c.config.Collectors.FileIngestor.PcapDnsPort
+	c.filterDnsPort = c.config.Collectors.FileIngestor.PcapDnsPort
 
-	c.LogInfo("watching directory to find [%s] files", c.config.Collectors.FileIngestor.WatchMode)
+	c.LogInfo("watching directory [%s] to find [%s] files",
+		c.config.Collectors.FileIngestor.WatchDir,
+		c.config.Collectors.FileIngestor.WatchMode)
 }
 
 func (c *FileIngestor) LogInfo(msg string, v ...interface{}) {
@@ -119,7 +121,7 @@ func (c *FileIngestor) ProcessFile(filePath string) {
 	switch c.config.Collectors.FileIngestor.WatchMode {
 	case dnsutils.MODE_PCAP:
 		// process file with pcap extension only
-		if filepath.Ext(filePath) == ".pcap" {
+		if filepath.Ext(filePath) == ".pcap" || filepath.Ext(filePath) == ".pcap.gz" {
 			c.LogInfo("file ready to process %s", filePath)
 			go c.ProcessPcap(filePath)
 		}
@@ -132,134 +134,162 @@ func (c *FileIngestor) ProcessFile(filePath string) {
 	}
 }
 
-func (c *FileIngestor) ProcessPcap(filePath string) error {
-
+func (c *FileIngestor) ProcessPcap(filePath string) {
 	// open the file
 	f, err := os.Open(filePath)
 	if err != nil {
-		return err
+		c.LogError("unable to read file: %s", err)
+		return
 	}
 	defer f.Close()
 
 	// it is a pcap file ?
 	pcapHandler, err := pcapgo.NewReader(f)
 	if err != nil {
-		c.LogInfo("failed to read pcap file: %s", err)
-		return err
+		c.LogError("unable to read pcap file: %s", err)
+		return
 	}
-	c.LogInfo("processing pcap file [%s]...", filePath)
+
+	fileName := filepath.Base(filePath)
+	c.LogInfo("processing pcap file [%s]...", fileName)
 
 	if pcapHandler.LinkType() != layers.LinkTypeEthernet {
-		msg := fmt.Sprintf("Link type not supported: %s", pcapHandler.LinkType())
-		c.LogInfo("pcap file [%s] ignored: %s", filePath, pcapHandler.LinkType())
-		return errors.New(msg)
+		c.LogError("pcap file [%s] ignored: %s", filePath, pcapHandler.LinkType())
+		return
 	}
 
-	// decode packets
-	var eth layers.Ethernet
-	var ip4 layers.IPv4
-	var ip6 layers.IPv6
-	var tcp layers.TCP
-	var udp layers.UDP
-	parser := gopacket.NewDecodingLayerParser(layers.LayerTypeEthernet, &eth, &ip4, &ip6, &tcp, &udp)
-	decodedLayers := make([]gopacket.LayerType, 0, 4)
+	dnsChan := make(chan netlib.DnsPacket)
+	udpChan := make(chan gopacket.Packet)
+	tcpChan := make(chan gopacket.Packet)
+	fragIp4Chan := make(chan gopacket.Packet)
+	fragIp6Chan := make(chan gopacket.Packet)
 
-	packets := gopacket.NewPacketSource(pcapHandler, pcapHandler.LinkType())
+	packetSource := gopacket.NewPacketSource(pcapHandler, pcapHandler.LinkType())
+	packetSource.DecodeOptions.Lazy = true
+	packetSource.NoCopy = true
+
+	// defrag ipv4
+	go netlib.IpDefragger(fragIp4Chan, udpChan, tcpChan)
+	// defrag ipv6
+	go netlib.IpDefragger(fragIp6Chan, udpChan, tcpChan)
+	// tcp assembly
+	go netlib.TcpAssembler(tcpChan, dnsChan, c.filterDnsPort)
+	// udp processor
+	go netlib.UdpProcessor(udpChan, dnsChan, c.filterDnsPort)
+
+	go func() {
+		nbPackets := 0
+		lastReceivedTime := time.Now()
+		for {
+			select {
+			case dnsPacket, noMore := <-dnsChan:
+				if !noMore {
+					goto end
+				}
+
+				lastReceivedTime = time.Now()
+				// prepare dns message
+				dm := dnsutils.DnsMessage{}
+				dm.Init()
+
+				dm.NetworkInfo.Family = dnsPacket.IpLayer.EndpointType().String()
+				dm.NetworkInfo.QueryIp = dnsPacket.IpLayer.Src().String()
+				dm.NetworkInfo.ResponseIp = dnsPacket.IpLayer.Dst().String()
+				dm.NetworkInfo.QueryPort = dnsPacket.TransportLayer.Src().String()
+				dm.NetworkInfo.ResponsePort = dnsPacket.TransportLayer.Dst().String()
+				dm.NetworkInfo.Protocol = dnsPacket.TransportLayer.EndpointType().String()
+				dm.NetworkInfo.IpDefragmented = dnsPacket.IpDefragmented
+				dm.NetworkInfo.TcpReassembled = dnsPacket.TcpReassembled
+
+				dm.DNS.Payload = dnsPacket.Payload
+				dm.DNS.Length = len(dnsPacket.Payload)
+
+				dm.DnsTap.Identity = c.identity
+				dm.DnsTap.TimeSec = dnsPacket.Timestamp.Second()
+				dm.DnsTap.TimeNsec = int(dnsPacket.Timestamp.UnixNano())
+
+				// count it
+				nbPackets++
+
+				// send DNS message to DNS processor
+				c.dnsProcessor.GetChannel() <- dm
+			case <-time.After(10 * time.Second):
+				elapsed := time.Since(lastReceivedTime)
+				if elapsed >= 10*time.Second {
+					close(fragIp4Chan)
+					close(fragIp6Chan)
+					close(udpChan)
+					close(tcpChan)
+					close(dnsChan)
+				}
+			}
+		}
+	end:
+		c.LogInfo("pcap file [%s]: %d DNS packet(s) detected", fileName, nbPackets)
+	}()
+
+	nbPackets := 0
 	for {
-		packet, err := packets.NextPacket()
+		packet, err := packetSource.NextPacket()
+
 		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
-			c.LogError("failed to read packet: %s", err)
+			c.LogError("unable to read packet: %s", err)
+			break
+		}
+
+		nbPackets++
+
+		// some security checks
+		if packet.NetworkLayer() == nil {
+			continue
+		}
+		if packet.TransportLayer() == nil {
 			continue
 		}
 
-		// parse layers
-		parser.DecodeLayers(packet.Data(), &decodedLayers)
-
-		// prepare dns message
-		dm := dnsutils.DnsMessage{}
-		dm.Init()
-
-		ignore_packet := false
-		for _, layertyp := range decodedLayers {
-			switch layertyp {
-			case layers.LayerTypeIPv4:
-				dm.NetworkInfo.Family = dnsutils.PROTO_IPV4
-				dm.NetworkInfo.QueryIp = ip4.SrcIP.String()
-				dm.NetworkInfo.ResponseIp = ip4.DstIP.String()
-
-			case layers.LayerTypeIPv6:
-				dm.NetworkInfo.QueryIp = ip6.SrcIP.String()
-				dm.NetworkInfo.ResponseIp = ip6.DstIP.String()
-				dm.NetworkInfo.Family = dnsutils.PROTO_IPV6
-
-			case layers.LayerTypeUDP:
-				// ignore packet if the port is not equal to 53
-				if int(udp.SrcPort) != c.dnsPort && int(udp.DstPort) != c.dnsPort {
-					ignore_packet = true
-					continue
-				}
-				dm.NetworkInfo.QueryPort = fmt.Sprint(int(udp.SrcPort))
-				dm.NetworkInfo.ResponsePort = fmt.Sprint(int(udp.DstPort))
-				dm.DNS.Payload = udp.Payload
-				dm.DNS.Length = len(udp.Payload)
-				dm.NetworkInfo.Protocol = dnsutils.PROTO_UDP
-
-			case layers.LayerTypeTCP:
-				// ignore packet if the port is not equal to 53
-				if int(udp.SrcPort) != c.dnsPort && int(udp.DstPort) != c.dnsPort {
-					ignore_packet = true
-				}
-
-				// ignore SYN/ACK packet
-				if !tcp.PSH {
-					ignore_packet = true
-					continue
-				}
-
-				dnsLengthField := binary.BigEndian.Uint16(tcp.Payload[0:2])
-				if len(tcp.Payload) < int(dnsLengthField) {
-					ignore_packet = true
-					continue
-				}
-
-				dm.NetworkInfo.QueryPort = fmt.Sprint(int(tcp.SrcPort))
-				dm.NetworkInfo.ResponsePort = fmt.Sprint(int(tcp.DstPort))
-				dm.DNS.Payload = tcp.Payload[2:]
-				dm.DNS.Length = len(tcp.Payload[2:])
-				dm.NetworkInfo.Protocol = dnsutils.PROTO_TCP
+		// ipv4 fragmented packet ?
+		if packet.NetworkLayer().LayerType() == layers.LayerTypeIPv4 {
+			ip4 := packet.NetworkLayer().(*layers.IPv4)
+			if ip4.Flags&layers.IPv4MoreFragments == 1 || ip4.FragOffset > 0 {
+				fragIp4Chan <- packet
+				continue
 			}
 		}
 
-		if !ignore_packet {
-			dm.DnsTap.Identity = c.identity
-
-			// set timestamp
-			dm.DnsTap.TimeSec = packet.Metadata().Timestamp.Second()
-			dm.DnsTap.TimeNsec = int(packet.Metadata().Timestamp.UnixNano())
-
-			// just decode QR
-			if len(dm.DNS.Payload) < 4 {
+		// ipv6 fragmented packet ?
+		if packet.NetworkLayer().LayerType() == layers.LayerTypeIPv6 {
+			v6frag := packet.Layer(layers.LayerTypeIPv6Fragment)
+			if v6frag != nil {
+				fragIp6Chan <- packet
 				continue
 			}
+		}
 
-			c.dnsProcessor.GetChannel() <- dm
+		// tcp or udp packets ?
+		if packet.TransportLayer().LayerType() == layers.LayerTypeUDP {
+			udpChan <- packet
+		}
+		if packet.TransportLayer().LayerType() == layers.LayerTypeTCP {
+			tcpChan <- packet
 		}
 
 	}
+
 	// remove it ?
-	c.LogInfo("ingest pcap [%s] terminated", filePath)
+	//assembler.FlushAll()
+	c.LogInfo("pcap file [%s] processing terminated, %d packet(s) read", fileName, nbPackets)
+
+	// remove it ?
 	if c.config.Collectors.FileIngestor.DeleteAfter {
-		c.LogInfo("delete file [%s]", filePath)
+		c.LogInfo("delete file [%s]", fileName)
 		os.Remove(filePath)
 	}
 
 	// remove event timer for this file
 	c.RemoveEvent(filePath)
-
-	return nil
 }
 
 func (c *FileIngestor) ProcessDnstap(filePath string) error {
@@ -279,7 +309,8 @@ func (c *FileIngestor) ProcessDnstap(filePath string) error {
 		return fmt.Errorf("failed to create framestream Decoder: %w", err)
 	}
 
-	c.LogInfo("processing dnstap file [%s]", filePath)
+	fileName := filepath.Base(filePath)
+	c.LogInfo("processing dnstap file [%s]", fileName)
 	for {
 		buf, err := dnstapDecoder.Decode()
 		if errors.Is(err, io.EOF) {
@@ -293,9 +324,9 @@ func (c *FileIngestor) ProcessDnstap(filePath string) error {
 	}
 
 	// remove it ?
-	c.LogInfo("ingest dnstap [%s] terminated", filePath)
+	c.LogInfo("processing of [%s] terminated", fileName)
 	if c.config.Collectors.FileIngestor.DeleteAfter {
-		c.LogInfo("delete file [%s]", filePath)
+		c.LogInfo("delete file [%s]", fileName)
 		os.Remove(filePath)
 	}
 
@@ -359,7 +390,7 @@ func (c *FileIngestor) Run() {
 		switch c.config.Collectors.FileIngestor.WatchMode {
 		case dnsutils.MODE_PCAP:
 			// process file with pcap extension
-			if filepath.Ext(fn) == ".pcap" {
+			if filepath.Ext(fn) == ".pcap" || filepath.Ext(fn) == ".pcap.gz" {
 				go c.ProcessPcap(fn)
 			}
 		case dnsutils.MODE_DNSTAP:

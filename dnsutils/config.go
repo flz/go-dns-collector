@@ -10,7 +10,8 @@ func IsValidMode(mode string) bool {
 	switch mode {
 	case
 		MODE_TEXT,
-		MODE_JSON:
+		MODE_JSON,
+		MODE_FLATJSON:
 		return true
 	}
 	return false
@@ -44,6 +45,7 @@ type ConfigTransformers struct {
 		Enable        bool `yaml:"enable"`
 		AnonymizeIP   bool `yaml:"anonymize-ip"`
 		MinimazeQname bool `yaml:"minimaze-qname"`
+		HashIP        bool `yaml:"hash-ip"`
 	} `yaml:"user-privacy"`
 	Normalize struct {
 		Enable         bool `yaml:"enable"`
@@ -52,6 +54,17 @@ type ConfigTransformers struct {
 		AddTld         bool `yaml:"add-tld"`
 		AddTldPlusOne  bool `yaml:"add-tld-plus-one"`
 	} `yaml:"normalize"`
+	Latency struct {
+		Enable            bool `yaml:"enable"`
+		MeasureLatency    bool `yaml:"measure-latency"`
+		UnansweredQueries bool `yaml:"unanswered-queries"`
+		QueriesTimeout    int  `yaml:"queries-timeout"`
+	}
+	Reducer struct {
+		Enable                    bool `yaml:"enable"`
+		RepetitiveTrafficDetector bool `yaml:"repetitive-traffic-detector"`
+		WatchInterval             int  `yaml:"watch-interval"`
+	}
 	Filtering struct {
 		Enable          bool     `yaml:"enable"`
 		DropFqdnFile    string   `yaml:"drop-fqdn-file"`
@@ -80,6 +93,10 @@ type ConfigTransformers struct {
 		UnallowedChars     []string `yaml:"unallowed-chars,flow"`
 		ThresholdMaxLabels int      `yaml:"threshold-max-labels"`
 	} `yaml:"suspicious"`
+	Extract struct {
+		Enable     bool `yaml:"enable"`
+		AddPayload bool `yaml:"add-payload"`
+	} `yaml:"extract"`
 }
 
 func (c *ConfigTransformers) SetDefault() {
@@ -95,12 +112,22 @@ func (c *ConfigTransformers) SetDefault() {
 	c.UserPrivacy.Enable = false
 	c.UserPrivacy.AnonymizeIP = false
 	c.UserPrivacy.MinimazeQname = false
+	c.UserPrivacy.HashIP = false
 
 	c.Normalize.Enable = false
 	c.Normalize.QnameLowerCase = false
 	c.Normalize.QuietText = false
 	c.Normalize.AddTld = false
 	c.Normalize.AddTldPlusOne = false
+
+	c.Latency.Enable = false
+	c.Latency.MeasureLatency = false
+	c.Latency.UnansweredQueries = false
+	c.Latency.QueriesTimeout = 2
+
+	c.Reducer.Enable = false
+	c.Reducer.RepetitiveTrafficDetector = false
+	c.Reducer.WatchInterval = 5
 
 	c.Filtering.Enable = false
 	c.Filtering.DropFqdnFile = ""
@@ -117,13 +144,18 @@ func (c *ConfigTransformers) SetDefault() {
 	c.GeoIP.DbCountryFile = ""
 	c.GeoIP.DbCityFile = ""
 	c.GeoIP.DbAsnFile = ""
+
+	c.Extract.Enable = false
+	c.Extract.AddPayload = false
 }
 
 /* main configuration */
 type Config struct {
 	Global struct {
-		TextFormat string `yaml:"text-format"`
-		Trace      struct {
+		TextFormat          string `yaml:"text-format"`
+		TextFormatDelimiter string `yaml:"text-format-delimiter"`
+		TextFormatBoundary  string `yaml:"text-format-boundary"`
+		Trace               struct {
 			Verbose      bool   `yaml:"verbose"`
 			LogMalformed bool   `yaml:"log-malformed"`
 			Filename     string `yaml:"filename"`
@@ -150,8 +182,7 @@ type Config struct {
 			TlsMinVersion string `yaml:"tls-min-version"`
 			CertFile      string `yaml:"cert-file"`
 			KeyFile       string `yaml:"key-file"`
-			CacheSupport  bool   `yaml:"cache-support"`
-			QueryTimeout  int    `yaml:"query-timeout"`
+			RcvBufSize    int    `yaml:"sock-rcvbuf"`
 		} `yaml:"dnstap"`
 		DnstapProxifier struct {
 			Enable        bool   `yaml:"enable"`
@@ -163,13 +194,16 @@ type Config struct {
 			CertFile      string `yaml:"cert-file"`
 			KeyFile       string `yaml:"key-file"`
 		} `yaml:"dnstap-proxifier"`
-		LiveCapture struct {
-			Enable       bool   `yaml:"enable"`
-			Port         int    `yaml:"port"`
-			Device       string `yaml:"device"`
-			CacheSupport bool   `yaml:"cache-support"`
-			QueryTimeout int    `yaml:"query-timeout"`
-		} `yaml:"sniffer"`
+		AfpacketLiveCapture struct {
+			Enable bool   `yaml:"enable"`
+			Port   int    `yaml:"port"`
+			Device string `yaml:"device"`
+		} `yaml:"afpacket-sniffer"`
+		XdpLiveCapture struct {
+			Enable bool   `yaml:"enable"`
+			Port   int    `yaml:"port"`
+			Device string `yaml:"device"`
+		} `yaml:"xdp-sniffer"`
 		PowerDNS struct {
 			Enable        bool   `yaml:"enable"`
 			ListenIP      string `yaml:"listen-ip"`
@@ -186,6 +220,11 @@ type Config struct {
 			PcapDnsPort int    `yaml:"pcap-dns-port"`
 			DeleteAfter bool   `yaml:"delete-after"`
 		} `yaml:"file-ingestor"`
+		Tzsp struct {
+			Enable     bool   `yaml:"enable"`
+			ListenIp   string `yaml:"listen-ip"`
+			ListenPort int    `yaml:"listen-port"`
+		}
 	} `yaml:"collectors"`
 
 	IngoingTransformers ConfigTransformers `yaml:"ingoing-transformers"`
@@ -197,16 +236,19 @@ type Config struct {
 			TextFormat string `yaml:"text-format"`
 		} `yaml:"stdout"`
 		Prometheus struct {
-			Enable        bool   `yaml:"enable"`
-			ListenIP      string `yaml:"listen-ip"`
-			ListenPort    int    `yaml:"listen-port"`
-			TlsSupport    bool   `yaml:"tls-support"`
-			TlsMutual     bool   `yaml:"tls-mutual"`
-			TlsMinVersion string `yaml:"tls-min-version"`
-			CertFile      string `yaml:"cert-file"`
-			KeyFile       string `yaml:"key-file"`
-			PromPrefix    string `yaml:"prometheus-prefix"`
-			TopN          int    `yaml:"top-n"`
+			Enable           bool   `yaml:"enable"`
+			ListenIP         string `yaml:"listen-ip"`
+			ListenPort       int    `yaml:"listen-port"`
+			TlsSupport       bool   `yaml:"tls-support"`
+			TlsMutual        bool   `yaml:"tls-mutual"`
+			TlsMinVersion    string `yaml:"tls-min-version"`
+			CertFile         string `yaml:"cert-file"`
+			KeyFile          string `yaml:"key-file"`
+			PromPrefix       string `yaml:"prometheus-prefix"`
+			TopN             int    `yaml:"top-n"`
+			BasicAuthLogin   string `yaml:"basic-auth-login"`
+			BasicAuthPwd     string `yaml:"basic-auth-pwd"`
+			BasicAuthEnabled bool   `yaml:"basic-auth-enable"`
 		} `yaml:"prometheus"`
 		RestAPI struct {
 			Enable         bool   `yaml:"enable"`
@@ -235,29 +277,36 @@ type Config struct {
 			TextFormat          string `yaml:"text-format"`
 		} `yaml:"logfile"`
 		Dnstap struct {
-			Enable        bool   `yaml:"enable"`
-			RemoteAddress string `yaml:"remote-address"`
-			RemotePort    int    `yaml:"remote-port"`
-			SockPath      string `yaml:"sock-path"`
-			RetryInterval int    `yaml:"retry-interval"`
-			TlsSupport    bool   `yaml:"tls-support"`
-			TlsInsecure   bool   `yaml:"tls-insecure"`
-			TlsMinVersion string `yaml:"tls-min-version"`
-			ServerId      string `yaml:"server-id"`
+			Enable            bool   `yaml:"enable"`
+			RemoteAddress     string `yaml:"remote-address"`
+			RemotePort        int    `yaml:"remote-port"`
+			SockPath          string `yaml:"sock-path"`
+			ConnectTimeout    int    `yaml:"connect-timeout"`
+			RetryInterval     int    `yaml:"retry-interval"`
+			FlushInterval     int    `yaml:"flush-interval"`
+			TlsSupport        bool   `yaml:"tls-support"`
+			TlsInsecure       bool   `yaml:"tls-insecure"`
+			TlsMinVersion     string `yaml:"tls-min-version"`
+			ServerId          string `yaml:"server-id"`
+			OverwriteIdentity bool   `yaml:"overwrite-identity"`
+			BufferSize        int    `yaml:"buffer-size"`
 		} `yaml:"dnstap"`
 		TcpClient struct {
-			Enable        bool   `yaml:"enable"`
-			RemoteAddress string `yaml:"remote-address"`
-			RemotePort    int    `yaml:"remote-port"`
-			SockPath      string `yaml:"sock-path"`
-			RetryInterval int    `yaml:"retry-interval"`
-			Transport     string `yaml:"transport"`
-			TlsSupport    bool   `yaml:"tls-support"`
-			TlsInsecure   bool   `yaml:"tls-insecure"`
-			TlsMinVersion string `yaml:"tls-min-version"`
-			Mode          string `yaml:"mode"`
-			TextFormat    string `yaml:"text-format"`
-			Delimiter     string `yaml:"delimiter"`
+			Enable           bool   `yaml:"enable"`
+			RemoteAddress    string `yaml:"remote-address"`
+			RemotePort       int    `yaml:"remote-port"`
+			SockPath         string `yaml:"sock-path"`
+			RetryInterval    int    `yaml:"retry-interval"`
+			Transport        string `yaml:"transport"`
+			TlsSupport       bool   `yaml:"tls-support"`
+			TlsInsecure      bool   `yaml:"tls-insecure"`
+			TlsMinVersion    string `yaml:"tls-min-version"`
+			Mode             string `yaml:"mode"`
+			TextFormat       string `yaml:"text-format"`
+			PayloadDelimiter string `yaml:"delimiter"`
+			BufferSize       int    `yaml:"buffer-size"`
+			FlushInterval    int    `yaml:"flush-interval"`
+			ConnectTimeout   int    `yaml:"connect-timeout"`
 		} `yaml:"tcpclient"`
 		Syslog struct {
 			Enable        bool   `yaml:"enable"`
@@ -273,16 +322,19 @@ type Config struct {
 			Format        string `yaml:"format"`
 		} `yaml:"syslog"`
 		Fluentd struct {
-			Enable        bool   `yaml:"enable"`
-			RemoteAddress string `yaml:"remote-address"`
-			RemotePort    int    `yaml:"remote-port"`
-			SockPath      string `yaml:"sock-path"`
-			RetryInterval int    `yaml:"retry-interval"`
-			Transport     string `yaml:"transport"`
-			TlsSupport    bool   `yaml:"tls-support"`
-			TlsInsecure   bool   `yaml:"tls-insecure"`
-			TlsMinVersion string `yaml:"tls-min-version"`
-			Tag           string `yaml:"tag"`
+			Enable         bool   `yaml:"enable"`
+			RemoteAddress  string `yaml:"remote-address"`
+			RemotePort     int    `yaml:"remote-port"`
+			SockPath       string `yaml:"sock-path"`
+			ConnectTimeout int    `yaml:"connect-timeout"`
+			RetryInterval  int    `yaml:"retry-interval"`
+			FlushInterval  int    `yaml:"flush-interval"`
+			Transport      string `yaml:"transport"`
+			TlsSupport     bool   `yaml:"tls-support"`
+			TlsInsecure    bool   `yaml:"tls-insecure"`
+			TlsMinVersion  string `yaml:"tls-min-version"`
+			Tag            string `yaml:"tag"`
+			BufferSize     int    `yaml:"buffer-size"`
 		} `yaml:"fluentd"`
 		InfluxDB struct {
 			Enable        bool   `yaml:"enable"`
@@ -325,6 +377,38 @@ type Config struct {
 			Enable bool   `yaml:"enable"`
 			URL    string `yaml:"url"`
 		} `yaml:"elasticsearch"`
+		ScalyrClient struct {
+			Enable        bool                   `yaml:"enable"`
+			Mode          string                 `yaml:"mode"`
+			TextFormat    string                 `yaml:"text-format"`
+			SessionInfo   map[string]string      `yaml:"sessioninfo"`
+			Attrs         map[string]interface{} `yaml:"attrs"`
+			ServerURL     string                 `yaml:"server-url"`
+			ApiKey        string                 `yaml:"apikey"`
+			Parser        string                 `yaml:"parser"`
+			FlushInterval int                    `yaml:"flush-interval"`
+			ProxyURL      string                 `yaml:"proxy-url"`
+			TlsInsecure   bool                   `yaml:"tls-insecure"`
+			TlsMinVersion string                 `yaml:"tls-min-version"`
+		} `yaml:"scalyrclient"`
+		RedisPub struct {
+			Enable           bool   `yaml:"enable"`
+			RemoteAddress    string `yaml:"remote-address"`
+			RemotePort       int    `yaml:"remote-port"`
+			SockPath         string `yaml:"sock-path"`
+			RetryInterval    int    `yaml:"retry-interval"`
+			Transport        string `yaml:"transport"`
+			TlsSupport       bool   `yaml:"tls-support"`
+			TlsInsecure      bool   `yaml:"tls-insecure"`
+			TlsMinVersion    string `yaml:"tls-min-version"`
+			Mode             string `yaml:"mode"`
+			TextFormat       string `yaml:"text-format"`
+			PayloadDelimiter string `yaml:"delimiter"`
+			BufferSize       int    `yaml:"buffer-size"`
+			FlushInterval    int    `yaml:"flush-interval"`
+			ConnectTimeout   int    `yaml:"connect-timeout"`
+			RedisChannel     string `yaml:"redis-channel"`
+		} `yaml:"redispub"`
 	} `yaml:"loggers"`
 
 	OutgoingTransformers ConfigTransformers `yaml:"outgoing-transformers"`
@@ -339,6 +423,8 @@ type Config struct {
 func (c *Config) SetDefault() {
 	// global config
 	c.Global.TextFormat = "timestamp identity operation rcode queryip queryport family protocol length qname qtype latency"
+	c.Global.TextFormatDelimiter = " "
+	c.Global.TextFormatBoundary = "\""
 
 	c.Global.Trace.Verbose = false
 	c.Global.Trace.LogMalformed = false
@@ -367,8 +453,7 @@ func (c *Config) SetDefault() {
 	c.Collectors.Dnstap.TlsMinVersion = TLS_v12
 	c.Collectors.Dnstap.CertFile = ""
 	c.Collectors.Dnstap.KeyFile = ""
-	c.Collectors.Dnstap.QueryTimeout = 5
-	c.Collectors.Dnstap.CacheSupport = false
+	c.Collectors.Dnstap.RcvBufSize = 0
 
 	c.Collectors.DnstapProxifier.Enable = false
 	c.Collectors.DnstapProxifier.ListenIP = ANY_IP
@@ -379,11 +464,12 @@ func (c *Config) SetDefault() {
 	c.Collectors.DnstapProxifier.CertFile = ""
 	c.Collectors.DnstapProxifier.KeyFile = ""
 
-	c.Collectors.LiveCapture.Enable = false
-	c.Collectors.LiveCapture.Port = 53
-	c.Collectors.LiveCapture.Device = ""
-	c.Collectors.LiveCapture.QueryTimeout = 5
-	c.Collectors.LiveCapture.CacheSupport = true
+	c.Collectors.XdpLiveCapture.Enable = false
+	c.Collectors.XdpLiveCapture.Device = ""
+
+	c.Collectors.AfpacketLiveCapture.Enable = false
+	c.Collectors.AfpacketLiveCapture.Port = 53
+	c.Collectors.AfpacketLiveCapture.Device = ""
 
 	c.Collectors.PowerDNS.Enable = false
 	c.Collectors.PowerDNS.ListenIP = ANY_IP
@@ -399,6 +485,10 @@ func (c *Config) SetDefault() {
 	c.Collectors.FileIngestor.WatchMode = MODE_PCAP
 	c.Collectors.FileIngestor.DeleteAfter = false
 
+	c.Collectors.Tzsp.Enable = false
+	c.Collectors.Tzsp.ListenIp = ANY_IP
+	c.Collectors.Tzsp.ListenPort = 10000
+
 	// Transformers for collectors
 	c.IngoingTransformers.SetDefault()
 
@@ -410,12 +500,16 @@ func (c *Config) SetDefault() {
 	c.Loggers.Dnstap.Enable = false
 	c.Loggers.Dnstap.RemoteAddress = LOCALHOST_IP
 	c.Loggers.Dnstap.RemotePort = 6000
-	c.Loggers.Dnstap.RetryInterval = 5
+	c.Loggers.Dnstap.ConnectTimeout = 5
+	c.Loggers.Dnstap.RetryInterval = 10
+	c.Loggers.Dnstap.FlushInterval = 30
 	c.Loggers.Dnstap.SockPath = ""
 	c.Loggers.Dnstap.TlsSupport = false
 	c.Loggers.Dnstap.TlsInsecure = false
 	c.Loggers.Dnstap.TlsMinVersion = TLS_v12
 	c.Loggers.Dnstap.ServerId = ""
+	c.Loggers.Dnstap.OverwriteIdentity = false
+	c.Loggers.Dnstap.BufferSize = 100
 
 	c.Loggers.LogFile.Enable = false
 	c.Loggers.LogFile.FilePath = ""
@@ -440,6 +534,9 @@ func (c *Config) SetDefault() {
 	c.Loggers.Prometheus.KeyFile = ""
 	c.Loggers.Prometheus.PromPrefix = PROG_NAME
 	c.Loggers.Prometheus.TopN = 10
+	c.Loggers.Prometheus.BasicAuthLogin = "admin"
+	c.Loggers.Prometheus.BasicAuthPwd = "changeme"
+	c.Loggers.Prometheus.BasicAuthEnabled = true
 
 	c.Loggers.RestAPI.Enable = false
 	c.Loggers.RestAPI.ListenIP = LOCALHOST_IP
@@ -456,14 +553,17 @@ func (c *Config) SetDefault() {
 	c.Loggers.TcpClient.RemoteAddress = LOCALHOST_IP
 	c.Loggers.TcpClient.RemotePort = 9999
 	c.Loggers.TcpClient.SockPath = ""
-	c.Loggers.TcpClient.RetryInterval = 5
+	c.Loggers.TcpClient.RetryInterval = 10
 	c.Loggers.TcpClient.Transport = "tcp"
 	c.Loggers.TcpClient.TlsSupport = false
 	c.Loggers.TcpClient.TlsInsecure = false
 	c.Loggers.TcpClient.TlsMinVersion = TLS_v12
 	c.Loggers.TcpClient.Mode = MODE_JSON
 	c.Loggers.TcpClient.TextFormat = ""
-	c.Loggers.TcpClient.Delimiter = "\n"
+	c.Loggers.TcpClient.PayloadDelimiter = "\n"
+	c.Loggers.TcpClient.BufferSize = 100
+	c.Loggers.TcpClient.ConnectTimeout = 5
+	c.Loggers.TcpClient.FlushInterval = 30
 
 	c.Loggers.Syslog.Enable = false
 	c.Loggers.Syslog.Severity = "INFO"
@@ -480,12 +580,15 @@ func (c *Config) SetDefault() {
 	c.Loggers.Fluentd.RemoteAddress = LOCALHOST_IP
 	c.Loggers.Fluentd.RemotePort = 24224
 	c.Loggers.Fluentd.SockPath = ""
-	c.Loggers.Fluentd.RetryInterval = 5
+	c.Loggers.Fluentd.RetryInterval = 10
+	c.Loggers.Fluentd.ConnectTimeout = 5
+	c.Loggers.Fluentd.FlushInterval = 30
 	c.Loggers.Fluentd.Transport = "tcp"
 	c.Loggers.Fluentd.TlsSupport = false
 	c.Loggers.Fluentd.TlsInsecure = false
 	c.Loggers.Fluentd.TlsMinVersion = TLS_v12
 	c.Loggers.Fluentd.Tag = "dns.collector"
+	c.Loggers.Fluentd.BufferSize = 100
 
 	c.Loggers.InfluxDB.Enable = false
 	c.Loggers.InfluxDB.ServerURL = "http://localhost:8086"
@@ -522,7 +625,24 @@ func (c *Config) SetDefault() {
 	c.Loggers.Statsd.TlsMinVersion = TLS_v12
 
 	c.Loggers.ElasticSearchClient.Enable = false
-	c.Loggers.ElasticSearchClient.URL = ""
+	c.Loggers.ElasticSearchClient.URL = "http://127.0.0.1:9200/indexname/_doc"
+
+	c.Loggers.RedisPub.Enable = false
+	c.Loggers.RedisPub.RemoteAddress = LOCALHOST_IP
+	c.Loggers.RedisPub.RemotePort = 6379
+	c.Loggers.RedisPub.SockPath = ""
+	c.Loggers.RedisPub.RetryInterval = 10
+	c.Loggers.RedisPub.Transport = SOCKET_TCP
+	c.Loggers.RedisPub.TlsSupport = false
+	c.Loggers.RedisPub.TlsInsecure = false
+	c.Loggers.RedisPub.TlsMinVersion = TLS_v12
+	c.Loggers.RedisPub.Mode = MODE_JSON
+	c.Loggers.RedisPub.TextFormat = ""
+	c.Loggers.RedisPub.PayloadDelimiter = "\n"
+	c.Loggers.RedisPub.BufferSize = 100
+	c.Loggers.RedisPub.ConnectTimeout = 5
+	c.Loggers.RedisPub.FlushInterval = 30
+	c.Loggers.RedisPub.RedisChannel = "dns_collector"
 
 	// Transformers for loggers
 	c.OutgoingTransformers.SetDefault()

@@ -8,7 +8,7 @@ import (
 	"github.com/dmachard/go-logger"
 )
 
-type DnsSniffer struct {
+type TzspSniffer struct {
 	done    chan bool
 	exit    chan bool
 	loggers []dnsutils.Worker
@@ -18,9 +18,9 @@ type DnsSniffer struct {
 }
 
 // workaround for macos, not yet supported
-func NewDnsSniffer(loggers []dnsutils.Worker, config *dnsutils.Config, logger *logger.Logger, name string) *DnsSniffer {
-	logger.Info("[%s] collector dns sniffer - enabled", name)
-	s := &DnsSniffer{
+func NewTzsp(loggers []dnsutils.Worker, config *dnsutils.Config, logger *logger.Logger, name string) *AfpacketSniffer {
+	logger.Info("[%s] tzsp collector - enabled", name)
+	s := &AfpacketSniffer{
 		done:    make(chan bool),
 		exit:    make(chan bool),
 		config:  config,
@@ -32,21 +32,21 @@ func NewDnsSniffer(loggers []dnsutils.Worker, config *dnsutils.Config, logger *l
 	return s
 }
 
-func (c *DnsSniffer) GetName() string { return c.name }
+func (c *TzspSniffer) GetName() string { return c.name }
 
-func (c *DnsSniffer) SetLoggers(loggers []dnsutils.Worker) {
+func (c *TzspSniffer) SetLoggers(loggers []dnsutils.Worker) {
 	c.loggers = loggers
 }
 
-func (c *DnsSniffer) LogInfo(msg string, v ...interface{}) {
-	c.logger.Info("["+c.name+"] collector dns sniffer - "+msg, v...)
+func (c *TzspSniffer) LogInfo(msg string, v ...interface{}) {
+	c.logger.Info("["+c.name+"] tzsp collector - "+msg, v...)
 }
 
-func (c *DnsSniffer) LogError(msg string, v ...interface{}) {
-	c.logger.Error("["+c.name+"] collector dns sniffer - "+msg, v...)
+func (c *TzspSniffer) LogError(msg string, v ...interface{}) {
+	c.logger.Error("["+c.name+"] tzsp collector - "+msg, v...)
 }
 
-func (c *DnsSniffer) Loggers() []chan dnsutils.DnsMessage {
+func (c *TzspSniffer) Loggers() []chan dnsutils.DnsMessage {
 	channels := []chan dnsutils.DnsMessage{}
 	for _, p := range c.loggers {
 		channels = append(channels, p.Channel())
@@ -54,14 +54,14 @@ func (c *DnsSniffer) Loggers() []chan dnsutils.DnsMessage {
 	return channels
 }
 
-func (c *DnsSniffer) ReadConfig() {
+func (c *TzspSniffer) ReadConfig() {
 }
 
-func (c *DnsSniffer) Channel() chan dnsutils.DnsMessage {
+func (c *TzspSniffer) Channel() chan dnsutils.DnsMessage {
 	return nil
 }
 
-func (c *DnsSniffer) Stop() {
+func (c *TzspSniffer) Stop() {
 	c.LogInfo("stopping...")
 
 	// exit to close properly
@@ -72,7 +72,7 @@ func (c *DnsSniffer) Stop() {
 	close(c.done)
 }
 
-func (c *DnsSniffer) Run() {
+func (c *TzspSniffer) Run() {
 	c.LogInfo("run terminated")
 	c.done <- true
 }

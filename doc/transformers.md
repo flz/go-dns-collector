@@ -1,10 +1,15 @@
 # DNS-collector - Transformers Guide
 
-- [Normalize](#normalize)
-- [User privacy](#user-privacy)
-- [GeoIP Support](#geoip-support)
-- [DNS filtering](#dns-filtering)
-- [Suspicious](#suspicious)
+- [DNS-collector - Transformers Guide](#dns-collector---transformers-guide)
+  - [Transformers](#transformers)
+    - [Normalize](#normalize)
+    - [User Privacy](#user-privacy)
+    - [GeoIP Support](#geoip-support)
+    - [Traffic filtering](#traffic-filtering)
+    - [Suspicious](#suspicious)
+    - [Latency Computing](#latency-computing)
+    - [Extractor](#extractor)
+    - [Traffic reducer](#traffic-reducer)
 
 ## Transformers
 
@@ -49,6 +54,21 @@ The following dns flag message will be replaced with the small form:
 - QUERY: `Q`
 - REPLY: `R`
 
+If one of add-tld  options is enable then the following json field are populated in your DNS message:
+
+Example:
+
+```json
+"publicsuffix": {
+  "etld+1": "eu.org",
+  "tld": "org",
+}
+```
+
+Specific directives added for text format:
+- `publicsuffix-tld`: [Public Suffix](https://publicsuffix.org/) of the DNS QNAME
+- `publicsuffix-etld+1`: [Public Suffix](https://publicsuffix.org/) plus one label of the DNS QNAME
+
 ### User Privacy
 
 Use this feature to protect user privacy. This feature can be used to anonymize all IP queries and reduce all qnames to second level.
@@ -58,12 +78,14 @@ For example:
 
 Options:
 - `anonymize-ip`: (boolean) enable or disable anomymiser ip
+- `hash-ip`: (boolean) hash query and response IP with sha1
 - `minimaze-qname`: (boolean) keep only the second level domain
 
 ```yaml
 transforms:
   user-privacy:
     anonymize-ip: false
+    hash-ip: false
     minimaze-qname: false
 ```
 
@@ -88,7 +110,7 @@ transforms:
     mmdb-asn-file: ""
 ```
 
-When the feature is enabled, the following json field are populated:
+When the feature is enabled, the following json field are populated in your DNS message:
 - `continent`
 - `country-isocode`
 - `city`
@@ -99,22 +121,23 @@ Example:
 
 ```json
 {
-  ...
-  "geo": {
+  "geoip": {
     "city": "-",
     "continent": "-",
-    "country-isocode": "-"
-  },
-  "network": {
-    ...
+    "country-isocode": "-",
     "as-number": 1234,
     "as-owner": "Orange",
   },
-  ...
-}
 ```
 
-### DNS filtering
+Specific directives added:
+- `geoip-continent`: continent code
+- `geoip-country`: country iso code
+- `geoip-city`: city name
+- `geoip-as-number`: autonomous system number
+- `geoip-as-owner`: autonomous system organization/owner
+
+### Traffic Filtering
 
 The filtering feature can be used to ignore some queries or replies according to:
 - qname
@@ -183,4 +206,104 @@ transforms:
     common-qtypes:  [ "A", "AAAA", "CNAME", "TXT", "PTR", "NAPTR", "DNSKEY", "SRV", "SOA", "NS", "MX", "DS" ]
     unallowed-chars: [ "\"", "==", "/", ":" ]
     threshold-max-labels: 10
+```
+
+Specific directive(s) available for the text format:
+- `suspicious-score`: suspicious score for unusual traffic
+
+When the feature is enabled, the following json field are populated in your DNS message:
+
+Example:
+
+```json
+  "suspicious": {
+    "score": 0.0,
+    "malformed-packet": false,
+    "large-pkt": false,
+    "long-domain": false,
+    "slow-domain": false,
+    "unallowed-chars": false,
+    "uncommon-qtypes": false,
+    "excessive-number-labels": false,
+  }
+```
+
+### Latency Computing
+
+
+Use this feature to compute latency and detect queries timeout
+
+Options:
+- `measure-latency`: (boolean) measure latency between replies and queries
+- `unanswered-queries`: (boolean) Detect evicted queries
+- `queries-timeout`: (integer) timeout in second for queries
+
+```yaml
+transforms:
+  latency:
+    measure-latency: false
+    unanswered-queries: false
+    queries-timeout: 2
+```
+
+Example of DNS messages in text format
+
+- **latency**
+
+```
+2023-04-11T18:23:45.564128Z unbound CLIENT_QUERY NOERROR 127.0.0.1 35255 IPv4 UDP 50b google.fr A 0.000000
+2023-04-11T18:23:45.56424Z unbound FORWARDER_QUERY NOERROR 0.0.0.0 34329 IPv4 UDP 38b google.fr A 0.000000
+2023-04-11T18:23:45.57501Z unbound FORWARDER_RESPONSE NOERROR 0.0.0.0 34329 IPv4 UDP 54b google.fr A 0.010770
+2023-04-11T18:23:45.575113Z unbound CLIENT_RESPONSE NOERROR 127.0.0.1 35255 IPv4 UDP 54b google.fr A 0.010985
+```
+
+- **unanswered queries**
+
+```
+2023-04-11T18:42:50.939138364Z dnsdist1 CLIENT_QUERY NOERROR 127.0.0.1 52376 IPv4 UDP 54b www.google.fr A 0.000000
+2023-04-11T18:42:50.939138364Z dnsdist1 CLIENT_QUERY TIMEOUT 127.0.0.1 52376 IPv4 UDP 54b www.google.fr A -
+```
+
+### Traffic Reducer
+
+Use this transformer to detect repetitive traffic
+
+Options:
+- `repetitive-traffic-detector`: (boolean) detect repetitive traffic
+- `watch-interval`: (integer) watch interval in seconds
+
+Default values:
+
+```yaml
+transforms:
+  reducer:
+    repetitive-traffic-detector: true
+    watch-interval: 5
+```
+
+Specific directive(s) available for the text format:
+- `repeated`: display the number of detected duplication
+
+### Extractor
+
+Use this transformer to extract the raw dns payload encoded in base64:
+
+Options:
+- `add-payload`: (boolean) add base64 encoded dns payload
+
+Default values:
+
+```yaml
+transforms:
+  extract:
+    add-payload: false
+```
+
+Specific directive(s) available for the text format:
+- `extracted-dns-payload`: add the base64 encoded of the dns message
+
+When the feature is enabled, an "extracted" field appears in the DNS message and is populated with a "dns_payload" field:
+
+```json
+{"network":{"family":"IPv4","protocol":"UDP","query-ip":"10.1.0.123","query-port":"56357","response-ip":"10.7.0.252","response-port":"53","ip-defragmented":false,"tcp-reassembled":false},"dns":{"length":63,"opcode":0,"rcode":"NOERROR","qname":"orange-sanguine.fr","qtype":"A","flags":{"qr":true,"tc":false,"aa":false,"ra":true,"ad":false},"resource-records":{"an":[{"name":"orange-sanguine.fr","rdatatype":"A","ttl":21600,"rdata":"193.203.239.81"}],"ns":[],"ar":[]},"malformed-packet":false},"edns":{"udp-size":1232,"rcode":0,"version":0,"dnssec-ok":0,"options":[]},"dnstap":{"operation":"CLIENT_RESPONSE","identity":"dns-collector","version":"-","timestamp-rfc3339ns":"2023-04-19T11:23:56.018192608Z","latency":"0.000000"},"extracted":{"dns_payload":"P6CBgAABAAEAAAABD29yYW5nZS1zYW5ndWluZQJmcgAAAQABwAwAAQABAABUYAAEwcvvUQAAKQTQAAAAAAAA"}}
 ```

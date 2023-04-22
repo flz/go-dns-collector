@@ -3,7 +3,6 @@ package loggers
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -81,7 +80,9 @@ func (o *StdOut) Run() {
 	o.LogInfo("running in background...")
 
 	// prepare transforms
-	subprocessors := transformers.NewTransforms(&o.config.OutgoingTransformers, o.logger, o.name)
+	listChannel := []chan dnsutils.DnsMessage{}
+	listChannel = append(listChannel, o.channel)
+	subprocessors := transformers.NewTransforms(&o.config.OutgoingTransformers, o.logger, o.name, listChannel)
 
 	// standard output buffer
 	buffer := new(bytes.Buffer)
@@ -92,12 +93,26 @@ func (o *StdOut) Run() {
 			continue
 		}
 
+		// fmt.Printf("Size of %T: %d bytes\n", dm, unsafe.Sizeof(dm))
+
 		switch o.config.Loggers.Stdout.Mode {
 		case dnsutils.MODE_TEXT:
-			o.stdout.Print(dm.String(o.textFormat))
+			o.stdout.Print(dm.String(o.textFormat,
+				o.config.Global.TextFormatDelimiter,
+				o.config.Global.TextFormatBoundary))
+
 		case dnsutils.MODE_JSON:
 			json.NewEncoder(buffer).Encode(dm)
-			fmt.Print(buffer.String())
+			o.stdout.Print(buffer.String())
+			buffer.Reset()
+
+		case dnsutils.MODE_FLATJSON:
+			flat, err := dm.Flatten()
+			if err != nil {
+				o.LogError("flattening DNS message failed: %e", err)
+			}
+			json.NewEncoder(buffer).Encode(flat)
+			o.stdout.Print(buffer.String())
 			buffer.Reset()
 		}
 	}

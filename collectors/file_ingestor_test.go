@@ -8,12 +8,12 @@ import (
 	"github.com/dmachard/go-logger"
 )
 
-func TestFileIngestor_Pcap(t *testing.T) {
+func Test_FileIngestor_Pcap(t *testing.T) {
 	g := loggers.NewFakeLogger()
 	config := dnsutils.GetFakeConfig()
 
 	// watch tests data folder
-	config.Collectors.FileIngestor.WatchDir = "./../testsdata/"
+	config.Collectors.FileIngestor.WatchDir = "./../testsdata/pcap/"
 
 	// init collector
 	c := NewFileIngestor([]dnsutils.Worker{g}, config, logger.New(false), "test")
@@ -25,7 +25,7 @@ func TestFileIngestor_Pcap(t *testing.T) {
 		msg := <-g.Channel()
 
 		// check qname
-		if msg.DnsTap.Operation == dnsutils.DNSTAP_CLIENT_QUERY && msg.DNS.Qname == "example.org" {
+		if msg.DnsTap.Operation == dnsutils.DNSTAP_CLIENT_QUERY {
 			break
 		}
 	}

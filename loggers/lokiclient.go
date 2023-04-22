@@ -21,8 +21,13 @@ import (
 	"github.com/klauspost/compress/snappy"
 
 	/*
-		workaround to install latest version of loki with tags
-		go get github.com/grafana/loki@f61a4d2612d8fa3a385c90c363301ec05bab34d8 github.com/deepmap/oapi-codegen@v1.9.1
+		install loki with tags
+		go get github.com/grafana/loki@90888a0cc737b60f29b8bed880a380731ae1e492
+		https://github.com/grafana/loki/releases/tag/v2.8.0
+
+		go get github.com/deepmap/oapi-codegen@v1.12.4
+		go get github.com/prometheus/prometheus@v0.42.0
+		go mod tidy
 	*/
 	"github.com/grafana/loki/pkg/logproto"
 )
@@ -168,7 +173,9 @@ func (o *LokiClient) Run() {
 	o.LogInfo("running in background...")
 
 	// prepare transforms
-	subprocessors := transformers.NewTransforms(&o.config.OutgoingTransformers, o.logger, o.name)
+	listChannel := []chan dnsutils.DnsMessage{}
+	listChannel = append(listChannel, o.channel)
+	subprocessors := transformers.NewTransforms(&o.config.OutgoingTransformers, o.logger, o.name, listChannel)
 
 	// prepare buffer
 	buffer := new(bytes.Buffer)
@@ -197,10 +204,19 @@ LOOP:
 
 			switch o.config.Loggers.LokiClient.Mode {
 			case dnsutils.MODE_TEXT:
-				delimiter := ""
-				entry.Line = string(dm.Bytes(o.textFormat, delimiter))
+				entry.Line = string(dm.Bytes(o.textFormat,
+					o.config.Global.TextFormatDelimiter,
+					o.config.Global.TextFormatBoundary))
 			case dnsutils.MODE_JSON:
 				json.NewEncoder(buffer).Encode(dm)
+				entry.Line = buffer.String()
+				buffer.Reset()
+			case dnsutils.MODE_FLATJSON:
+				flat, err := dm.Flatten()
+				if err != nil {
+					o.LogError("flattening DNS message failed: %e", err)
+				}
+				json.NewEncoder(buffer).Encode(flat)
 				entry.Line = buffer.String()
 				buffer.Reset()
 			}
@@ -298,7 +314,10 @@ func (o *LokiClient) SendEntries(buf []byte) {
 			post.Header.Set("X-Scope-OrgID", o.config.Loggers.LokiClient.TenantId)
 		}
 
-		post.SetBasicAuth(o.config.Loggers.LokiClient.BasicAuthLogin, o.config.Loggers.LokiClient.BasicAuthPwd)
+		post.SetBasicAuth(
+			o.config.Loggers.LokiClient.BasicAuthLogin,
+			o.config.Loggers.LokiClient.BasicAuthPwd,
+		)
 
 		// send post and read response
 		resp, err := o.httpclient.Do(post)

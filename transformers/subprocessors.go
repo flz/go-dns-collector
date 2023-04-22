@@ -21,11 +21,14 @@ type Transforms struct {
 	FilteringTransform   FilteringProcessor
 	UserPrivacyTransform UserPrivacyProcessor
 	NormalizeTransform   NormalizeProcessor
+	LatencyTransform     *LatencyProcessor
+	ReducerTransform     *ReducerProcessor
+	ExtractProcessor     ExtractProcessor
 
 	activeTransforms []func(dm *dnsutils.DnsMessage) int
 }
 
-func NewTransforms(config *dnsutils.ConfigTransformers, logger *logger.Logger, name string) Transforms {
+func NewTransforms(config *dnsutils.ConfigTransformers, logger *logger.Logger, name string, outChannels []chan dnsutils.DnsMessage) Transforms {
 
 	d := Transforms{
 		config: config,
@@ -36,7 +39,10 @@ func NewTransforms(config *dnsutils.ConfigTransformers, logger *logger.Logger, n
 		GeoipTransform:       NewDnsGeoIpProcessor(config, logger),
 		FilteringTransform:   NewFilteringProcessor(config, logger, name),
 		UserPrivacyTransform: NewUserPrivacySubprocessor(config),
-		NormalizeTransform:   NewNormalizeSubprocessor(config),
+		NormalizeTransform:   NewNormalizeSubprocessor(config, logger, name),
+		LatencyTransform:     NewLatencySubprocessor(config, logger, name, outChannels),
+		ReducerTransform:     NewReducerSubprocessor(config, logger, name, outChannels),
+		ExtractProcessor:     NewExtractSubprocessor(config),
 	}
 
 	d.Prepare()
@@ -44,26 +50,6 @@ func NewTransforms(config *dnsutils.ConfigTransformers, logger *logger.Logger, n
 }
 
 func (p *Transforms) Prepare() error {
-	if p.config.Normalize.Enable {
-		if p.config.Normalize.QnameLowerCase {
-			p.activeTransforms = append(p.activeTransforms, p.lowercaseQname)
-			p.LogInfo("[normalize: lowercase] enabled")
-		}
-
-		if p.config.Normalize.QuietText {
-			p.activeTransforms = append(p.activeTransforms, p.quietText)
-			p.LogInfo("[normalize: quiet text] enabled")
-		}
-
-		if p.config.Normalize.AddTld {
-			p.activeTransforms = append(p.activeTransforms, p.GetEffectiveTld)
-			p.LogInfo("[normalize: add tld] enabled")
-		}
-		if p.config.Normalize.AddTldPlusOne {
-			p.activeTransforms = append(p.activeTransforms, p.GetEffectiveTldPlusOne)
-			p.LogInfo("[normalize: add tld+1] enabled")
-		}
-	}
 
 	if p.config.GeoIP.Enable {
 		p.activeTransforms = append(p.activeTransforms, p.geoipTransform)
@@ -78,12 +64,17 @@ func (p *Transforms) Prepare() error {
 		// Apply user privacy on qname and query ip
 		if p.config.UserPrivacy.AnonymizeIP {
 			p.activeTransforms = append(p.activeTransforms, p.anonymizeIP)
-			p.LogInfo("[user privacy: anonymizeIP] enabled")
+			p.LogInfo("[user privacy: anonymize IP] enabled")
 		}
 
 		if p.config.UserPrivacy.MinimazeQname {
 			p.activeTransforms = append(p.activeTransforms, p.minimazeQname)
-			p.LogInfo("[user privacy: minimazeQname] enabled")
+			p.LogInfo("[user privacy: minimaze Qname] enabled")
+		}
+
+		if p.config.UserPrivacy.HashIP {
+			p.activeTransforms = append(p.activeTransforms, p.hashIP)
+			p.LogInfo("[user privacy: hash IP] enabled")
 		}
 	}
 
@@ -96,7 +87,49 @@ func (p *Transforms) Prepare() error {
 		p.LogInfo("[filtering] enabled")
 	}
 
+	if p.config.Latency.Enable {
+		if p.config.Latency.MeasureLatency {
+			p.activeTransforms = append(p.activeTransforms, p.measureLatency)
+			p.LogInfo("[latency: measure latency] enabled")
+		}
+		if p.config.Latency.UnansweredQueries {
+			p.activeTransforms = append(p.activeTransforms, p.detectEvictedTimeout)
+			p.LogInfo("[latency: unanswered queries] enabled")
+		}
+	}
+
+	if p.config.Reducer.Enable {
+		p.LogInfo("[reducer] enabled")
+	}
+
+	if p.config.Extract.Enable {
+		if p.config.Extract.AddPayload {
+			p.activeTransforms = append(p.activeTransforms, p.addBase64Payload)
+			p.LogInfo("[extract: payload] enabled")
+		}
+
+	}
+
 	return nil
+}
+
+func (p *Transforms) InitDnsMessageFormat(dm *dnsutils.DnsMessage) {
+	if p.config.GeoIP.Enable {
+		p.GeoipTransform.InitDnsMessage(dm)
+	}
+	if p.config.Suspicious.Enable {
+		p.SuspiciousTransform.InitDnsMessage(dm)
+	}
+	if p.config.Normalize.Enable {
+		if p.config.Normalize.AddTld || p.config.Normalize.AddTldPlusOne {
+			p.NormalizeTransform.InitDnsMessage(dm)
+		}
+	}
+	if p.config.Extract.Enable {
+		if p.config.Extract.AddPayload {
+			p.ExtractProcessor.InitDnsMessage(dm)
+		}
+	}
 }
 
 func (p *Transforms) Reset() {
@@ -129,23 +162,8 @@ func (p *Transforms) geoipTransform(dm *dnsutils.DnsMessage) int {
 	dm.Geo.Continent = geoInfo.Continent
 	dm.Geo.CountryIsoCode = geoInfo.CountryISOCode
 	dm.Geo.City = geoInfo.City
-	dm.NetworkInfo.AutonomousSystemNumber = geoInfo.ASN
-	dm.NetworkInfo.AutonomousSystemOrg = geoInfo.ASO
-
-	return RETURN_SUCCESS
-}
-
-func (p *Transforms) GetEffectiveTld(dm *dnsutils.DnsMessage) int {
-	if etld, err := p.NormalizeTransform.GetEffectiveTld(dm.DNS.Qname); err == nil {
-		dm.DNS.QnamePublicSuffix = etld
-	}
-	return RETURN_SUCCESS
-}
-
-func (p *Transforms) GetEffectiveTldPlusOne(dm *dnsutils.DnsMessage) int {
-	if etld, err := p.NormalizeTransform.GetEffectiveTldPlusOne(dm.DNS.Qname); err == nil {
-		dm.DNS.QnameEffectiveTLDPlusOne = etld
-	}
+	dm.Geo.AutonomousSystemNumber = geoInfo.ASN
+	dm.Geo.AutonomousSystemOrg = geoInfo.ASO
 
 	return RETURN_SUCCESS
 }
@@ -156,30 +174,43 @@ func (p *Transforms) anonymizeIP(dm *dnsutils.DnsMessage) int {
 	return RETURN_SUCCESS
 }
 
+func (p *Transforms) hashIP(dm *dnsutils.DnsMessage) int {
+	dm.NetworkInfo.QueryIp = p.UserPrivacyTransform.HashIP(dm.NetworkInfo.QueryIp)
+	dm.NetworkInfo.ResponseIp = p.UserPrivacyTransform.HashIP(dm.NetworkInfo.ResponseIp)
+	return RETURN_SUCCESS
+}
+
+func (p *Transforms) measureLatency(dm *dnsutils.DnsMessage) int {
+	p.LatencyTransform.MeasureLatency(dm)
+	return RETURN_SUCCESS
+}
+
+func (p *Transforms) detectEvictedTimeout(dm *dnsutils.DnsMessage) int {
+	p.LatencyTransform.DetectEvictedTimeout(dm)
+	return RETURN_SUCCESS
+}
+
 func (p *Transforms) minimazeQname(dm *dnsutils.DnsMessage) int {
 	dm.DNS.Qname = p.UserPrivacyTransform.MinimazeQname(dm.DNS.Qname)
 
 	return RETURN_SUCCESS
 }
 
-func (p *Transforms) lowercaseQname(dm *dnsutils.DnsMessage) int {
-	dm.DNS.Qname = p.NormalizeTransform.Lowercase(dm.DNS.Qname)
-
-	return RETURN_SUCCESS
-}
-
-func (p *Transforms) quietText(dm *dnsutils.DnsMessage) int {
-	p.NormalizeTransform.QuietText(dm)
-	return RETURN_SUCCESS
-}
-
 func (p *Transforms) ProcessMessage(dm *dnsutils.DnsMessage) int {
+	// Begin to normalize
+	p.NormalizeTransform.ProcessDnsMessage(dm)
+
 	// Traffic filtering ?
 	if p.FilteringTransform.CheckIfDrop(dm) {
 		return RETURN_DROP
 	}
 
-	// transform dm
+	// Traffic reducer ?
+	if p.ReducerTransform.ProcessDnsMessage(dm) == RETURN_DROP {
+		return RETURN_DROP
+	}
+
+	//  and finaly apply other transformation
 	var r_code int
 	for _, fn := range p.activeTransforms {
 		r_code = fn(dm)
@@ -188,5 +219,10 @@ func (p *Transforms) ProcessMessage(dm *dnsutils.DnsMessage) int {
 		}
 	}
 
+	return RETURN_SUCCESS
+}
+
+func (p *Transforms) addBase64Payload(dm *dnsutils.DnsMessage) int {
+	dm.Extracted.Base64Payload = p.ExtractProcessor.AddBase64Payload(dm)
 	return RETURN_SUCCESS
 }
