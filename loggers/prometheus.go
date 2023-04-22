@@ -246,7 +246,7 @@ func (o *Prometheus) InitProm() {
 			Name: fmt.Sprintf("%s_top_domains", prom_prefix),
 			Help: "Number of hit per domain topN, partitioned by qname",
 		},
-		[]string{"stream_id", "domain", "dm.NetworkingInfo.ResponseIp"},
+		[]string{"stream_id", "domain", "resolver"},
 	)
 	o.promRegistry.MustRegister(o.gaugeTopDomains)
 
@@ -255,7 +255,7 @@ func (o *Prometheus) InitProm() {
 			Name: fmt.Sprintf("%s_top_nxdomains", prom_prefix),
 			Help: "Number of hit per nx domain topN, partitioned by qname",
 		},
-		[]string{"stream_id", "domain", "dm.NetworkingInfo.ResponseIp"},
+		[]string{"stream_id", "domain", "resolver"},
 	)
 	o.promRegistry.MustRegister(o.gaugeTopNxDomains)
 
@@ -273,7 +273,7 @@ func (o *Prometheus) InitProm() {
 			Name: fmt.Sprintf("%s_top_requesters", prom_prefix),
 			Help: "Number of hit per requester topN, partitioned by client IP",
 		},
-		[]string{"stream_id", "ip", "dm.NetworkingInfo.ResponseIp"},
+		[]string{"stream_id", "ip", "resolver"},
 	)
 	o.promRegistry.MustRegister(o.gaugeTopRequesters)
 
