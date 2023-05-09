@@ -9,7 +9,7 @@
 
 `DNS-collector` acts as a passive high speed **ingestor, aggregator and analyzer** for your DNS traffic, written in **Golang**. The DNS traffic can be collected and aggregated from simultaneously [sources](doc/collectors.md) like DNStap streams, network interface or log files and relays it to multiple other [listeners](doc/loggers.md) with some [transformations](doc/transformers.md) on it ([traffic filtering](doc/transformers.md#dns-filtering), [user privacy](doc/transformers.md#user-privacy), ...) and DNS protocol conversions (to [plain text](doc/configuration.md#custom-text-format), [json](doc/dnsjson.md), and more... ).
 
-Additionally, DNS-collector also support 
+Additionally, DNS-collector also support
 - [Extension Mechanisms for DNS (EDNS)](doc/dnsparser.md) decoding
 - IPv4/v6 defragmentation and TCP reassembly
 - Nanoseconds in timestamps
@@ -32,24 +32,27 @@ Additionally, DNS-collector also support
 
 **Loggers**:
 
-- *Local storage of your DNS logs in plain [`Text`](doc/configuration.md#custom-text-format),  [`Json`](doc/dnsjson.md), [`Pcap`](doc/loggers.md#log-file) or [`Dnstap`](doc/loggers.md#log-file) formats:*
-    - [`Stdout`](doc/loggers.md#stdout) console with custom [directives](doc/configuration.md#custom-text-format)
-    - [`File`](doc/loggers.md#log-file) with automatic rotation and compression
+- *Local storage of your DNS logs in plain [`Text`](doc/configuration.md#custom-text-format),  [`Json`](doc/dnsjson.md), [`Pcap`](doc/logger_file.md) or [`Dnstap`](doc/logger_file.md) formats:*
+    - [`Stdout`](doc/logger_stdout.md) console with custom [directives](doc/configuration.md#custom-text-format)
+    - [`File`](doc/logger_file.md) with automatic rotation and compression
 - *Provide metrics and API*
-    - [`Prometheus`](doc/loggers.md#prometheus) metrics and visualize-it with built-in [dashboards](doc/dashboards.md) for Grafana
-    - [`Statsd`](doc/loggers.md#statsd-client) support
-    - [`REST API`](doc/loggers.md#rest-api) with [swagger](https://generator.swagger.io/?url=https://raw.githubusercontent.com/dmachard/go-dnscollector/main/doc/swagger.yml) to search DNS domains
+    - [`Prometheus`](doc/logger_prometheus.md) metrics and visualize-it with built-in [dashboards](doc/logger_prometheus.md#grafana-dashboards) for Grafana
+    - [`Statsd`](doc/logger_statsd.md) support
+    - [`REST API`](doc/logger_restapi.md) with [swagger](https://generator.swagger.io/?url=https://raw.githubusercontent.com/dmachard/go-dnscollector/main/doc/swagger.yml) to search DNS domains
 - *Send to remote host with generic transport protocol*
-    - [`TCP`](doc/loggers.md#tcp-client)
-    - [`Syslog`](doc/loggers.md#syslog)
-    - [`DNSTap`](doc/loggers.md#dnstap-client) protobuf messages
+    - [`TCP`](doc/logger_tcp.md)
+    - [`Syslog`](doc/logger_syslog.md)
+    - [`DNSTap`](doc/logger_dnstap.md) protobuf messages
 - *Send to various sinks*
-    - [`Fluentd`](doc/loggers.md#fluentd-client)
-    - [`InfluxDB`](doc/loggers.md#influxdb-client)
-    - [`Loki`](doc/loggers.md#loki-client)
-    - [`ElasticSearch`](doc/loggers.md#elasticsearch-client)
-    - [`Scalyr`](doc/loggers.md#scalyr-client)
-    - [`Redis`](doc/loggers.md#redispub)
+    - [`Fluentd`](doc/logger_fluentd.md)
+    - [`InfluxDB`](doc/logger_influxdb.md)
+    - [`Loki`](doc/logger_loki.md)
+    - [`ElasticSearch`](doc/logger_elasticsearch.md)
+    - [`Scalyr`](doc/logger_scalyr.md)
+    - [`Redis`](doc/logger_redis.md)
+    - [`Kafka`](doc/logger_kafka.md)
+- *Send to security tools*
+    - [`Falco`](doc/logger_falco.md)
 
 **Transformers**:
 
@@ -92,7 +95,7 @@ If you prefer run it from docker, follow this [guide](doc/docker.md).
 
 ## Configuration
 
-The configuration of DNS-collector is done through a file named [`config.yml`](config.yml). When the DNS-collector starts, it will look for the config.yml from the current working directory. 
+The configuration of DNS-collector is done through a file named [`config.yml`](config.yml). When the DNS-collector starts, it will look for the config.yml from the current working directory.
 
 See the full [configuration guide](doc/configuration.md) for more details.
 
@@ -127,7 +130,7 @@ You will find below some examples of configuration to manage your DNS logs.
 - Capture DNS traffic from PCAP files
     - [x] [Capture DNSTap stream and backup-it to text and pcap files](example-config/use-case-1.yml)
     - [x] [Watch for PCAP files as input and JSON as output](example-config/use-case-15.yml)
-    
+
 - Capture DNS traffic from Mikrotik device
     - [x] [Capture TZSP packets containing DNS packets and process them as json](example-config/use-case-17.yml)
 

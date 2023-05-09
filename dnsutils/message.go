@@ -134,7 +134,7 @@ type DnsTap struct {
 	Identity         string  `json:"identity" msgpack:"identity"`
 	Version          string  `json:"version" msgpack:"version"`
 	TimestampRFC3339 string  `json:"timestamp-rfc3339ns" msgpack:"timestamp-rfc3339ns"`
-	Timestamp        float64 `json:"-" msgpack:"-"`
+	Timestamp        int64   `json:"-" msgpack:"-"`
 	TimeSec          int     `json:"-" msgpack:"-"`
 	TimeNsec         int     `json:"-" msgpack:"-"`
 	Latency          float64 `json:"-" msgpack:"-"`
@@ -219,7 +219,6 @@ func (dm *DnsMessage) Init() {
 		Z:             0,
 		Options:       []DnsOption{},
 	}
-
 }
 
 func (dm *DnsMessage) handleGeoIPDirectives(directives []string, s *bytes.Buffer) {
@@ -309,7 +308,7 @@ func (dm *DnsMessage) handlePdnsDirectives(directives []string, s *bytes.Buffer)
 }
 
 func (dm *DnsMessage) handleSuspiciousDirectives(directives []string, s *bytes.Buffer) {
-	if dm.PowerDns == nil {
+	if dm.Suspicious == nil {
 		s.WriteString("-")
 	} else {
 		switch directive := directives[0]; {
@@ -383,16 +382,14 @@ func (dm *DnsMessage) Bytes(format []string, fieldDelimiter string, fieldBoundar
 			s.WriteString(strconv.Itoa(len(dm.DNS.DnsRRs.Answers)))
 		case directive == "id":
 			s.WriteString(strconv.Itoa(dm.DNS.Id))
-		case directive == "timestamp": // keep it just for backward compatibility
-			s.WriteString(dm.DnsTap.TimestampRFC3339)
-		case directive == "timestamp-rfc3339ns":
+		case directive == "timestamp-rfc3339ns", directive == "timestamp":
 			s.WriteString(dm.DnsTap.TimestampRFC3339)
 		case directive == "timestamp-unixms":
-			s.WriteString(fmt.Sprintf("%.3f", dm.DnsTap.Timestamp))
+			s.WriteString(fmt.Sprintf("%d", dm.DnsTap.Timestamp/1000000))
 		case directive == "timestamp-unixus":
-			s.WriteString(fmt.Sprintf("%.6f", dm.DnsTap.Timestamp))
+			s.WriteString(fmt.Sprintf("%d", dm.DnsTap.Timestamp/1000))
 		case directive == "timestamp-unixns":
-			s.WriteString(fmt.Sprintf("%.9f", dm.DnsTap.Timestamp))
+			s.WriteString(fmt.Sprintf("%d", dm.DnsTap.Timestamp))
 		case directive == "localtime":
 			ts := time.Unix(int64(dm.DnsTap.TimeSec), int64(dm.DnsTap.TimeNsec))
 			s.WriteString(ts.Format("2006-01-02 15:04:05.999999999"))
@@ -433,7 +430,6 @@ func (dm *DnsMessage) Bytes(format []string, fieldDelimiter string, fieldBoundar
 		case directive == "latency":
 			s.WriteString(dm.DnsTap.LatencySec)
 		case directive == "malformed":
-			//s.WriteString(strconv.Itoa(dm.DNS.MalformedPacket))
 			if dm.DNS.MalformedPacket {
 				s.WriteString("PKTERR")
 			} else {
@@ -508,6 +504,22 @@ func (dm *DnsMessage) Bytes(format []string, fieldDelimiter string, fieldBoundar
 
 func (dm *DnsMessage) String(format []string, fieldDelimiter string, fieldBoundary string) string {
 	return string(dm.Bytes(format, fieldDelimiter, fieldBoundary))
+}
+
+func (dm *DnsMessage) ToJson() string {
+	buffer := new(bytes.Buffer)
+	json.NewEncoder(buffer).Encode(dm)
+	return buffer.String()
+}
+
+func (dm *DnsMessage) ToFlattenJson() (string, error) {
+	buffer := new(bytes.Buffer)
+	flat, err := dm.Flatten()
+	if err != nil {
+		return "", err
+	}
+	json.NewEncoder(buffer).Encode(flat)
+	return buffer.String(), nil
 }
 
 func (dm *DnsMessage) ToDnstap() ([]byte, error) {

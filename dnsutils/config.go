@@ -3,6 +3,7 @@ package dnsutils
 import (
 	"os"
 
+	"github.com/prometheus/prometheus/model/relabel"
 	"gopkg.in/yaml.v3"
 )
 
@@ -347,20 +348,21 @@ type Config struct {
 			Organization  string `yaml:"organization"`
 		} `yaml:"influxdb"`
 		LokiClient struct {
-			Enable         bool   `yaml:"enable"`
-			ServerURL      string `yaml:"server-url"`
-			JobName        string `yaml:"job-name"`
-			Mode           string `yaml:"mode"`
-			FlushInterval  int    `yaml:"flush-interval"`
-			BatchSize      int    `yaml:"batch-size"`
-			RetryInterval  int    `yaml:"retry-interval"`
-			TextFormat     string `yaml:"text-format"`
-			ProxyURL       string `yaml:"proxy-url"`
-			TlsInsecure    bool   `yaml:"tls-insecure"`
-			TlsMinVersion  string `yaml:"tls-min-version"`
-			BasicAuthLogin string `yaml:"basic-auth-login"`
-			BasicAuthPwd   string `yaml:"basic-auth-pwd"`
-			TenantId       string `yaml:"tenant-id"`
+			Enable         bool              `yaml:"enable"`
+			ServerURL      string            `yaml:"server-url"`
+			JobName        string            `yaml:"job-name"`
+			Mode           string            `yaml:"mode"`
+			FlushInterval  int               `yaml:"flush-interval"`
+			BatchSize      int               `yaml:"batch-size"`
+			RetryInterval  int               `yaml:"retry-interval"`
+			TextFormat     string            `yaml:"text-format"`
+			ProxyURL       string            `yaml:"proxy-url"`
+			TlsInsecure    bool              `yaml:"tls-insecure"`
+			TlsMinVersion  string            `yaml:"tls-min-version"`
+			BasicAuthLogin string            `yaml:"basic-auth-login"`
+			BasicAuthPwd   string            `yaml:"basic-auth-pwd"`
+			TenantId       string            `yaml:"tenant-id"`
+			RelabelConfigs []*relabel.Config `yaml:"relabel-configs"`
 		} `yaml:"lokiclient"`
 		Statsd struct {
 			Enable        bool   `yaml:"enable"`
@@ -409,6 +411,29 @@ type Config struct {
 			ConnectTimeout   int    `yaml:"connect-timeout"`
 			RedisChannel     string `yaml:"redis-channel"`
 		} `yaml:"redispub"`
+		KafkaProducer struct {
+			Enable         bool   `yaml:"enable"`
+			RemoteAddress  string `yaml:"remote-address"`
+			RemotePort     int    `yaml:"remote-port"`
+			RetryInterval  int    `yaml:"retry-interval"`
+			TlsSupport     bool   `yaml:"tls-support"`
+			TlsInsecure    bool   `yaml:"tls-insecure"`
+			TlsMinVersion  string `yaml:"tls-min-version"`
+			SaslSupport    bool   `yaml:"sasl-support"`
+			SaslUsername   string `yaml:"sasl-username"`
+			SaslPassword   string `yaml:"sasl-password"`
+			SaslMechanism  string `yaml:"sasl-mechanism"`
+			Mode           string `yaml:"mode"`
+			BufferSize     int    `yaml:"buffer-size"`
+			FlushInterval  int    `yaml:"flush-interval"`
+			ConnectTimeout int    `yaml:"connect-timeout"`
+			Topic          string `yaml:"topic"`
+			Partition      int    `yaml:"partition"`
+		} `yaml:"kafkaproducer"`
+		FalcoClient struct {
+			Enable bool   `yaml:"enable"`
+			URL    string `yaml:"url"`
+		} `yaml:"falco"`
 	} `yaml:"loggers"`
 
 	OutgoingTransformers ConfigTransformers `yaml:"outgoing-transformers"`
@@ -643,6 +668,27 @@ func (c *Config) SetDefault() {
 	c.Loggers.RedisPub.ConnectTimeout = 5
 	c.Loggers.RedisPub.FlushInterval = 30
 	c.Loggers.RedisPub.RedisChannel = "dns_collector"
+
+	c.Loggers.KafkaProducer.Enable = false
+	c.Loggers.KafkaProducer.RemoteAddress = LOCALHOST_IP
+	c.Loggers.KafkaProducer.RemotePort = 9092
+	c.Loggers.KafkaProducer.RetryInterval = 10
+	c.Loggers.KafkaProducer.TlsSupport = false
+	c.Loggers.KafkaProducer.TlsInsecure = false
+	c.Loggers.KafkaProducer.TlsMinVersion = TLS_v12
+	c.Loggers.KafkaProducer.SaslSupport = false
+	c.Loggers.KafkaProducer.SaslUsername = ""
+	c.Loggers.KafkaProducer.SaslPassword = ""
+	c.Loggers.KafkaProducer.SaslMechanism = SASL_MECHANISM_PLAIN
+	c.Loggers.KafkaProducer.Mode = MODE_FLATJSON
+	c.Loggers.KafkaProducer.BufferSize = 100
+	c.Loggers.KafkaProducer.ConnectTimeout = 5
+	c.Loggers.KafkaProducer.FlushInterval = 10
+	c.Loggers.KafkaProducer.Topic = "dnscollector"
+	c.Loggers.KafkaProducer.Partition = 0
+
+	c.Loggers.FalcoClient.Enable = false
+	c.Loggers.FalcoClient.URL = "http://127.0.0.1:9200"
 
 	// Transformers for loggers
 	c.OutgoingTransformers.SetDefault()
